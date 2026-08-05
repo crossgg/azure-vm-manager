@@ -1059,6 +1059,10 @@ button {
   background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
 }
 
+.action-btn.edit {
+  background: linear-gradient(135deg, #475569 0%, #334155 100%);
+}
+
 .action-btn.security-list {
   background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
 }
@@ -1512,6 +1516,170 @@ button {
   background: var(--red);
   color: #fff;
   border-color: var(--red);
+}
+
+/* OCI instance edit */
+.oci-edit-modal-panel {
+  width: min(920px, 100%);
+}
+
+.oci-edit-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.oci-edit-summary > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.oci-edit-summary span,
+.oci-edit-section-title {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.oci-edit-summary strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.oci-edit-section {
+  display: grid;
+  gap: 8px;
+}
+
+.oci-family-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.oci-family-card {
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.oci-family-card strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.oci-family-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.oci-family-card.active {
+  border-color: rgba(242, 102, 34, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(242, 102, 34, 0.35);
+}
+
+.oci-family-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--muted);
+}
+
+.oci-family-card:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.oci-selected-shape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.oci-selected-shape strong,
+.oci-selected-shape span {
+  display: block;
+}
+
+.oci-selected-shape strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.oci-selected-shape span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.oci-shape-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.oci-shape-badges span {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(242, 102, 34, 0.25);
+  border-radius: 999px;
+  color: var(--oci);
+  background: rgba(242, 102, 34, 0.08);
+  font-weight: 700;
+}
+
+.oci-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.oci-downtime-row {
+  padding: 12px 14px;
+  border: 1px solid var(--amber-border);
+  border-radius: var(--radius-sm);
+  background: var(--amber-bg);
+}
+
+.oci-limit-note {
+  padding: 12px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: var(--panel-soft);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* OCI rules list details */
@@ -2018,6 +2186,20 @@ button {
 }
 
 @media (max-width: 900px) {
+  .oci-edit-summary,
+  .oci-family-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oci-selected-shape {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .oci-shape-badges {
+    justify-content: flex-start;
+  }
+
   .dt-stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -2041,6 +2223,12 @@ button {
 }
 
 @media (max-width: 640px) {
+  .oci-edit-summary,
+  .oci-family-grid,
+  .oci-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dt-stats-grid {
     grid-template-columns: 1fr 1fr;
   }

@@ -384,6 +384,24 @@
     </div>
   </div>
 
+  <!-- OCI Instance Edit Modal -->
+  <div id="oci-edit-modal" class="modal-overlay" hidden>
+    <div class="modal-panel oci-edit-modal-panel">
+      <div class="modal-header">
+        <h3 id="oci-edit-title">编辑 OCI 实例</h3>
+        <button id="oci-edit-close" class="ghost-btn" type="button">✕</button>
+      </div>
+      <div id="oci-edit-body" class="modal-body">
+        <div class="empty-state compact">加载中...</div>
+      </div>
+      <div class="modal-footer">
+        <button id="oci-edit-cancel" class="secondary-btn" type="button">取消</button>
+        <button id="oci-edit-save" class="primary-btn" type="button">保存更改</button>
+      </div>
+      <div id="oci-edit-message" class="form-message"></div>
+    </div>
+  </div>
+
   <!-- OCI Security List Modal for VM -->
   <div id="security-list-modal" class="modal-overlay" hidden>
     <div class="modal-panel sg-modal-panel">

@@ -413,6 +413,7 @@ function renderVMCard(vm) {
         <button class="action-btn change-ip" type="button" data-action="change-ip">换 IP</button>
         ${dnsEnabled ? '<button class="action-btn dns" type="button" data-action="update-dns">更新 DNS</button>' : ''}
         <button class="action-btn dns-bind" type="button" data-action="dns-bind">DNS 绑定</button>
+        ${provider === 'oci' ? '<button class="action-btn edit" type="button" data-action="edit">编辑</button>' : ''}
         ${provider === 'oci' ? '<button class="action-btn security-list" type="button" data-action="security-list">安全规则</button>' : ''}
       </div>
     </article>
@@ -434,7 +435,8 @@ async function handleVMAction(button) {
     stop: '关机',
     restart: '重启',
     'change-ip': '换 IP',
-    'update-dns': '更新 DNS'
+    'update-dns': '更新 DNS',
+    edit: '编辑'
   };
 
   if (action === 'dns-bind') {
@@ -443,6 +445,10 @@ async function handleVMAction(button) {
   }
   if (action === 'security-list') {
     openSecurityListModal(vm);
+    return;
+  }
+  if (action === 'edit') {
+    openOCIEditModal(vm);
     return;
   }
   if (action === 'start' && vm.status === 'VM running') {
@@ -1268,6 +1274,365 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dns-modal-body')?.addEventListener('click', e => {
     const btn = e.target.closest('.dns-remove-btn');
     if (btn) removeDNSBindingRow(btn.dataset.index);
+  });
+});
+
+// ==================== OCI Instance Edit ====================
+
+let ociEditModalVM = null;
+let ociEditOptions = null;
+let ociEditLoadSeq = 0;
+
+const OCI_SHAPE_FAMILIES = [
+  { key: 'amd', label: 'AMD', description: '弹性 OCPU 数。当代 AMD 处理器。' },
+  { key: 'intel', label: 'Intel', description: '弹性 OCPU 数。当代 Intel 处理器。' },
+  { key: 'ampere', label: 'Ampere', description: '基于 ARM 的处理器。' },
+  { key: 'special', label: '专用和上一代', description: '密集 I/O、GPU、HPC、Generic 以及旧规格。' }
+];
+
+function openOCIEditModal(vm) {
+  ociEditModalVM = vm;
+  ociEditOptions = null;
+  document.getElementById('oci-edit-title').textContent = `编辑 OCI 实例 - ${vm.accountId}/${vm.name}`;
+  document.getElementById('oci-edit-body').innerHTML = '<div class="empty-state compact">加载中...</div>';
+  document.getElementById('oci-edit-message').textContent = '';
+  document.getElementById('oci-edit-message').className = 'form-message';
+  document.getElementById('oci-edit-save').disabled = true;
+  document.getElementById('oci-edit-modal').hidden = false;
+  loadOCIEditOptions(vm);
+}
+
+function closeOCIEditModal() {
+  document.getElementById('oci-edit-modal').hidden = true;
+  ociEditModalVM = null;
+  ociEditOptions = null;
+}
+
+async function loadOCIEditOptions(vm, shape = '', preserve = {}) {
+  const seq = ++ociEditLoadSeq;
+  const msgEl = document.getElementById('oci-edit-message');
+  if (shape) {
+    msgEl.textContent = '正在读取该规格的可用上限...';
+    msgEl.className = 'form-message';
+  }
+
+  try {
+    const query = shape ? `?shape=${encodeURIComponent(shape)}` : '';
+    const data = await fetchJSON(`/api/vm/${encodeURIComponent(vm.provider)}/${encodeURIComponent(vm.accountId)}/${encodeURIComponent(vm.id)}/edit-options${query}`);
+    if (seq !== ociEditLoadSeq || !ociEditModalVM) return;
+    ociEditOptions = data;
+    renderOCIEditForm(data, preserve);
+    document.getElementById('oci-edit-save').disabled = false;
+  } catch (err) {
+    if (seq !== ociEditLoadSeq) return;
+    document.getElementById('oci-edit-body').innerHTML = `<div class="empty-state compact error">${escapeHtml(err.message)}</div>`;
+    document.getElementById('oci-edit-save').disabled = true;
+  }
+}
+
+function currentOCIEditFormValues() {
+  return {
+    displayName: document.getElementById('oci-edit-display-name')?.value?.trim() || '',
+    allowDowntime: document.getElementById('oci-edit-allow-downtime')?.checked ?? true
+  };
+}
+
+function renderOCIEditForm(data, preserve = {}) {
+  const instance = data.instance || {};
+  const shape = data.selectedShape || {};
+  const sameShape = shape.name === instance.shape;
+  const ocpus = preserve.ocpus ?? (sameShape ? instance.ocpus : ociShapeDefaultOcpus(shape, data.limits?.ocpu));
+  const memory = preserve.memoryInGBs ?? (sameShape ? instance.memoryInGBs : ociShapeDefaultMemory(shape, ocpus, data.limits?.memory));
+  const displayName = preserve.displayName ?? instance.displayName ?? instance.id ?? '';
+  const allowDowntime = preserve.allowDowntime ?? true;
+
+  document.getElementById('oci-edit-body').innerHTML = `
+    <div class="oci-edit-summary">
+      <div><span>当前规格</span><strong>${escapeHtml(instance.shape || '-')}</strong></div>
+      <div><span>当前 OCPU</span><strong>${escapeHtml(formatOCIAmount(instance.ocpus || 0))}</strong></div>
+      <div><span>当前内存</span><strong>${escapeHtml(formatOCIAmount(instance.memoryInGBs || 0))} GB</strong></div>
+      <div><span>可用区</span><strong>${escapeHtml(instance.availabilityDomain || '-')}</strong></div>
+    </div>
+
+    <label class="field">
+      <span>实例名称</span>
+      <input id="oci-edit-display-name" type="text" value="${escapeAttr(displayName)}">
+    </label>
+
+    <div class="oci-edit-section">
+      <div class="oci-edit-section-title">配置系列</div>
+      <div class="oci-family-grid">
+        ${ociFamilyCardsHTML(data.shapes || [], shape.family)}
+      </div>
+    </div>
+
+    <label class="field">
+      <span>配置名称</span>
+      <select id="oci-edit-shape">
+        ${ociShapeOptionsHTML(data.shapes || [], shape.name)}
+      </select>
+    </label>
+
+    <div class="oci-selected-shape">
+      <div>
+        <strong>${escapeHtml(shape.name || '-')}</strong>
+        <span>${escapeHtml(shape.processorDescription || (shape.isFlexible ? 'Flex shape' : 'Fixed shape'))}</span>
+      </div>
+      <div class="oci-shape-badges">
+        ${shape.isFlexible ? '<span>Flex</span>' : '<span>固定规格</span>'}
+        ${shape.maxVnicAttachments ? `<span>最大 VNIC ${escapeHtml(shape.maxVnicAttachments)}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="oci-edit-grid">
+      <label class="field">
+        <span>OCPU 数</span>
+        <input id="oci-edit-ocpus" type="number" min="0" step="0.25" value="${escapeAttr(ociNumberInputValue(ocpus))}" ${shape.isFlexible ? '' : 'disabled'}>
+        <small id="oci-edit-ocpu-range" class="field-hint"></small>
+      </label>
+      <label class="field">
+        <span>内存（GB）</span>
+        <input id="oci-edit-memory" type="number" min="0" step="1" value="${escapeAttr(ociNumberInputValue(memory))}" ${shape.isFlexible ? '' : 'disabled'}>
+        <small id="oci-edit-memory-range" class="field-hint"></small>
+      </label>
+    </div>
+
+    <label class="switch-row oci-downtime-row">
+      <input id="oci-edit-allow-downtime" type="checkbox" ${allowDowntime ? 'checked' : ''}>
+      <span>允许停机完成规格变更</span>
+    </label>
+
+    <div id="oci-edit-limit-note" class="oci-limit-note"></div>
+  `;
+
+  updateOCIEditRangeHints();
+  renderOCIEditWarnings(data.warnings || []);
+}
+
+function ociFamilyCardsHTML(shapes, selectedFamily) {
+  return OCI_SHAPE_FAMILIES.map(family => {
+    const count = shapes.filter(shape => shape.family === family.key).length;
+    const disabled = count === 0;
+    return `
+      <button class="oci-family-card ${selectedFamily === family.key ? 'active' : ''}" data-family="${escapeAttr(family.key)}" type="button" ${disabled ? 'disabled' : ''}>
+        <strong>${escapeHtml(family.label)}</strong>
+        <span>${escapeHtml(family.description)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function ociShapeOptionsHTML(shapes, selectedName) {
+  return OCI_SHAPE_FAMILIES.map(family => {
+    const familyShapes = shapes.filter(shape => shape.family === family.key);
+    if (familyShapes.length === 0) return '';
+    return `
+      <optgroup label="${escapeAttr(family.label)}">
+        ${familyShapes.map(shape => `
+          <option value="${escapeAttr(shape.name)}" ${shape.name === selectedName ? 'selected' : ''}>
+            ${escapeHtml(shape.name)}${shape.isFlexible ? ' · Flex' : ''}
+          </option>
+        `).join('')}
+      </optgroup>
+    `;
+  }).join('');
+}
+
+function updateOCIEditRangeHints() {
+  if (!ociEditOptions?.selectedShape) return;
+  const shape = ociEditOptions.selectedShape;
+  const ocpuInput = document.getElementById('oci-edit-ocpus');
+  const memoryInput = document.getElementById('oci-edit-memory');
+  const ocpuRangeEl = document.getElementById('oci-edit-ocpu-range');
+  const memoryRangeEl = document.getElementById('oci-edit-memory-range');
+  const noteEl = document.getElementById('oci-edit-limit-note');
+  if (!ocpuInput || !memoryInput || !ocpuRangeEl || !memoryRangeEl) return;
+
+  const ranges = ociEditComputedRanges();
+  ocpuInput.min = ranges.ocpuMin;
+  ocpuInput.max = ranges.ocpuMax;
+  memoryInput.min = ranges.memoryMin;
+  memoryInput.max = ranges.memoryMax;
+
+  ocpuRangeEl.textContent = ociRangeText('OCPU', ranges.ocpuMin, ranges.ocpuMax, ociEditOptions.limits?.ocpu);
+  memoryRangeEl.textContent = ociRangeText('内存', ranges.memoryMin, ranges.memoryMax, ociEditOptions.limits?.memory, 'GB');
+
+  const notes = [];
+  if (!shape.isFlexible) {
+    notes.push('当前选择的是固定规格，OCPU 和内存会随规格自动确定。');
+  }
+  if (ociEditOptions.limits?.ocpu?.hasAvailability || ociEditOptions.limits?.memory?.hasAvailability) {
+    notes.push('最大值已按规格上限与当前账号剩余额度计算。');
+  } else {
+    notes.push('未读取到账号剩余额度，当前仅显示规格允许范围。');
+  }
+  noteEl.textContent = notes.join(' ');
+}
+
+function ociEditComputedRanges() {
+  const shape = ociEditOptions.selectedShape || {};
+  const limits = ociEditOptions.limits || {};
+  const ocpuLimit = limits.ocpu || {};
+  const memoryLimit = limits.memory || {};
+
+  const ocpuMin = numberOrFallback(ocpuLimit.shapeMin, shape.ocpuOptions?.min, shape.ocpus, 0);
+  const ocpuMax = numberOrFallback(ocpuLimit.effectiveMax, ocpuLimit.shapeMax, shape.ocpuOptions?.max, shape.ocpus, ocpuMin);
+  const selectedOcpus = Number(document.getElementById('oci-edit-ocpus')?.value || ocpuMin) || ocpuMin;
+
+  let memoryMin = numberOrFallback(memoryLimit.shapeMin, shape.memoryOptions?.minInGBs, shape.memoryInGBs, 0);
+  let memoryMax = numberOrFallback(memoryLimit.effectiveMax, memoryLimit.shapeMax, shape.memoryOptions?.maxInGBs, shape.memoryInGBs, memoryMin);
+  if (shape.memoryOptions?.minPerOcpuInGBs) {
+    memoryMin = Math.max(memoryMin, selectedOcpus * Number(shape.memoryOptions.minPerOcpuInGBs));
+  }
+  if (shape.memoryOptions?.maxPerOcpuInGBs) {
+    memoryMax = Math.min(memoryMax, selectedOcpus * Number(shape.memoryOptions.maxPerOcpuInGBs));
+  }
+
+  return { ocpuMin, ocpuMax, memoryMin, memoryMax };
+}
+
+function ociRangeText(label, min, max, limit = {}, unit = '') {
+  const suffix = unit ? ` ${unit}` : '';
+  const sourceText = limit?.hasAvailability
+    ? `最大可用 ${formatOCIAmount(max)}${suffix}（规格上限 ${formatOCIAmount(limit.shapeMax || max)}${suffix}）`
+    : `规格范围 ${formatOCIAmount(min)} - ${formatOCIAmount(limit.shapeMax || max)}${suffix}`;
+  const availability = limit?.hasAvailability
+    ? `，剩余额度 ${formatOCIAmount(limit.available || 0)}${suffix}${limit.reusable ? `，当前实例可复用 ${formatOCIAmount(limit.reusable)}${suffix}` : ''}`
+    : '';
+  const errorText = limit?.error ? `；额度读取失败：${limit.error}` : '';
+  return `${label} 应介于 ${formatOCIAmount(min)} 和 ${formatOCIAmount(max)}${suffix} 之间。${sourceText}${availability}${errorText}`;
+}
+
+function renderOCIEditWarnings(warnings) {
+  const msgEl = document.getElementById('oci-edit-message');
+  if (!warnings.length) {
+    msgEl.textContent = '';
+    msgEl.className = 'form-message';
+    return;
+  }
+  msgEl.textContent = warnings.join('；');
+  msgEl.className = 'form-message';
+}
+
+function ociShapeDefaultOcpus(shape = {}, limit = {}) {
+  return numberOrFallback(shape.memoryOptions?.defaultOcpus, shape.ocpus, limit.shapeMin, shape.ocpuOptions?.min, 0);
+}
+
+function ociShapeDefaultMemory(shape = {}, ocpus = 0, limit = {}) {
+  const direct = numberOrFallback(shape.memoryOptions?.defaultMemoryInGBs, shape.memoryInGBs, 0);
+  if (direct > 0) return direct;
+  if (shape.memoryOptions?.defaultPerOcpuInGBs && ocpus > 0) {
+    return Number(shape.memoryOptions.defaultPerOcpuInGBs) * ocpus;
+  }
+  return numberOrFallback(limit.shapeMin, shape.memoryOptions?.minInGBs, 0);
+}
+
+function ociNumberInputValue(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return formatOCIAmount(n);
+}
+
+function numberOrFallback(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function formatOCIAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  if (Math.abs(n - Math.round(n)) < 0.000001) return String(Math.round(n));
+  return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+async function saveOCIEditModal() {
+  if (!ociEditModalVM || !ociEditOptions?.selectedShape) return;
+  const msgEl = document.getElementById('oci-edit-message');
+  const saveBtn = document.getElementById('oci-edit-save');
+  const shape = ociEditOptions.selectedShape;
+  const ranges = ociEditComputedRanges();
+  const displayName = document.getElementById('oci-edit-display-name')?.value?.trim() || '';
+  const ocpus = Number(document.getElementById('oci-edit-ocpus')?.value || 0);
+  const memoryInGBs = Number(document.getElementById('oci-edit-memory')?.value || 0);
+  const allowDowntime = document.getElementById('oci-edit-allow-downtime')?.checked === true;
+
+  if (!displayName) {
+    msgEl.textContent = '实例名称不能为空。';
+    msgEl.className = 'form-message error';
+    return;
+  }
+  if (shape.isFlexible) {
+    if (ocpus < ranges.ocpuMin || ocpus > ranges.ocpuMax) {
+      msgEl.textContent = `OCPU 数应介于 ${formatOCIAmount(ranges.ocpuMin)} 和 ${formatOCIAmount(ranges.ocpuMax)} 之间。`;
+      msgEl.className = 'form-message error';
+      return;
+    }
+    if (memoryInGBs < ranges.memoryMin || memoryInGBs > ranges.memoryMax) {
+      msgEl.textContent = `内存应介于 ${formatOCIAmount(ranges.memoryMin)} GB 和 ${formatOCIAmount(ranges.memoryMax)} GB 之间。`;
+      msgEl.className = 'form-message error';
+      return;
+    }
+  }
+  if (allowDowntime && ociEditModalVM.status === 'VM running' && !confirm('调整 OCI 规格可能导致实例短暂重启，确认提交？')) {
+    return;
+  }
+
+  msgEl.textContent = '正在提交 OCI 实例编辑请求...';
+  msgEl.className = 'form-message';
+  saveBtn.disabled = true;
+
+  try {
+    const vm = ociEditModalVM;
+    const payload = {
+      displayName,
+      shape: shape.name,
+      ocpus,
+      memoryInGBs,
+      baselineOcpuUtilization: ociEditOptions.instance?.baselineOcpuUtilization || '',
+      allowDowntime
+    };
+    const data = await fetchJSON(`/api/vm/${encodeURIComponent(vm.provider)}/${encodeURIComponent(vm.accountId)}/${encodeURIComponent(vm.id)}/edit`, {
+      method: 'POST',
+      body: payload
+    });
+    addLog(data.message || `OCI 实例 ${vm.name} 编辑请求已提交。`, 'success');
+    closeOCIEditModal();
+    setTimeout(() => refreshVM(vm), 5000);
+  } catch (err) {
+    msgEl.textContent = err.message;
+    msgEl.className = 'form-message error';
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('oci-edit-close')?.addEventListener('click', closeOCIEditModal);
+  document.getElementById('oci-edit-cancel')?.addEventListener('click', closeOCIEditModal);
+  document.getElementById('oci-edit-save')?.addEventListener('click', saveOCIEditModal);
+  document.getElementById('oci-edit-modal')?.addEventListener('click', event => {
+    if (event.target.id === 'oci-edit-modal') closeOCIEditModal();
+  });
+  document.getElementById('oci-edit-body')?.addEventListener('click', event => {
+    const familyBtn = event.target.closest('.oci-family-card[data-family]');
+    if (!familyBtn || familyBtn.disabled || !ociEditModalVM || !ociEditOptions) return;
+    const family = familyBtn.dataset.family;
+    const nextShape = (ociEditOptions.shapes || []).find(shape => shape.family === family);
+    if (!nextShape || nextShape.name === ociEditOptions.selectedShape?.name) return;
+    loadOCIEditOptions(ociEditModalVM, nextShape.name, currentOCIEditFormValues());
+  });
+  document.getElementById('oci-edit-body')?.addEventListener('change', event => {
+    if (event.target.id === 'oci-edit-shape' && ociEditModalVM) {
+      loadOCIEditOptions(ociEditModalVM, event.target.value, currentOCIEditFormValues());
+    }
+  });
+  document.getElementById('oci-edit-body')?.addEventListener('input', event => {
+    if (event.target.id === 'oci-edit-ocpus') {
+      updateOCIEditRangeHints();
+    }
   });
 });
 

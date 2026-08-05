@@ -170,6 +170,8 @@ func (o *OCIService) normalizeVM(instance map[string]interface{}) map[string]int
 	id := stringValue(instance["id"])
 	name := valueOrDefault(stringValue(instance["displayName"]), id)
 	shape := stringValue(instance["shape"])
+	shapeConfig, _ := instance["shapeConfig"].(map[string]interface{})
+	sourceDetails, _ := instance["sourceDetails"].(map[string]interface{})
 	region := o.account.Region
 	privateIP := "未分配"
 	publicIP := map[string]interface{}{"ipAddress": "未分配", "name": "N/A"}
@@ -186,17 +188,21 @@ func (o *OCIService) normalizeVM(instance map[string]interface{}) map[string]int
 	}
 
 	return map[string]interface{}{
-		"provider":      "oci",
-		"accountId":     o.account.Name,
-		"group":         o.account.Group,
-		"id":            id,
-		"name":          name,
-		"location":      region,
-		"status":        ociStatusText(stringValue(instance["lifecycleState"])),
-		"vmSize":        shape,
-		"privateIP":     privateIP,
-		"publicIP":      publicIP,
-		"resourceGroup": o.account.CompartmentID,
+		"provider":           "oci",
+		"accountId":          o.account.Name,
+		"group":              o.account.Group,
+		"id":                 id,
+		"name":               name,
+		"location":           region,
+		"status":             ociStatusText(stringValue(instance["lifecycleState"])),
+		"vmSize":             shape,
+		"ocpus":              float64InterfaceValue(shapeConfig["ocpus"]),
+		"memoryInGBs":        float64InterfaceValue(shapeConfig["memoryInGBs"]),
+		"availabilityDomain": stringValue(instance["availabilityDomain"]),
+		"imageId":            stringValue(sourceDetails["imageId"]),
+		"privateIP":          privateIP,
+		"publicIP":           publicIP,
+		"resourceGroup":      o.account.CompartmentID,
 	}
 }
 

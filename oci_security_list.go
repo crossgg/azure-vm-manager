@@ -83,7 +83,7 @@ func saveOCISecurityListRules(c *gin.Context) {
 func getOCIService(c *gin.Context) (*OCIService, bool) {
 	provider := strings.ToLower(c.Param("provider"))
 	if provider != "oci" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "security rule management is only supported for OCI accounts"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "this operation is only supported for OCI accounts"})
 		return nil, false
 	}
 

@@ -184,9 +184,68 @@ oci=end
 
 OCI 机器 ID 在 DNS 绑定里写 instance OCID。
 
+### OCI 权限建议
+
+OCI API Key 对应的用户/组需要能读取实例、VNIC、子网、规格、限额，并能执行你在网页上使用的操作。可以按最小权限拆分，也可以先在测试 compartment 内授予较完整的管理权限再收敛。
+
+常用能力和权限方向：
+
+- 实例列表、开关机、重启、编辑规格：需要读取和管理 Compute Instance。
+- 换公网 IP：需要读取 VNIC / Private IP，并能创建、删除、解绑 Public IP。
+- 安全列表：需要读取子网关联的 Security List，并能更新 Security List 规则。
+- 网络安全组：需要读取、创建、更新 Network Security Group，并能更新 VNIC 的 NSG 关联。
+- 实例编辑最大可用 OCPU / 内存提示：需要读取 Limits / Resource Availability；如果没有该权限，页面会回退显示规格允许范围。
+- 数据传输监控：需要读取 Monitoring 指标，当前通过 `oci_vcn` 的 `VnicToNetworkBytes` 汇总查询。
+
+示例策略需要根据你的 tenancy、group、compartment 名称调整：
+
+```text
+Allow group vm-manager to manage instances in compartment <compartment-name>
+Allow group vm-manager to manage virtual-network-family in compartment <compartment-name>
+Allow group vm-manager to read metrics in compartment <compartment-name>
+Allow group vm-manager to inspect limits in tenancy
+Allow group vm-manager to read resource-availability in tenancy
+```
+
+如果只想使用查看和开关机功能，可以进一步收窄权限；如果要使用安全规则、换 IP、编辑实例、数据传输监控，则需要保留对应资源的管理或读取权限。
+
+### OCI 数据传输监控配置
+
+OCI 账号块可以配置数据传输监控参数，也可以在网页「实例管理」中选择 OCI 账号后通过「监控设置」保存。保存后会写回 `config/config.conf` 并自动重载。
+
+```ini
+oci=begin
+[oci-jp]
+group=oci
+user=ocid1.user.oc1...
+fingerprint=xx:xx:xx
+tenancy=ocid1.tenancy.oc1...
+compartment_id=ocid1.compartment.oc1...
+region=ap-tokyo-1
+key_file=/app/config/keys/oci.pem
+dt_monitor_enabled=false
+dt_monitor_interval=300
+dt_monitor_threshold=9000
+dt_monitor_auto_stop=false
+dt_monitor_stop_method=soft
+oci=end
+```
+
+字段含义：
+
+```ini
+dt_monitor_enabled=false       # 是否启动周期检测
+dt_monitor_interval=300        # 检测周期，单位秒，最小建议 60
+dt_monitor_threshold=9000      # 流量阈值，单位 GB
+dt_monitor_auto_stop=false     # 超过阈值后是否自动停机
+dt_monitor_stop_method=soft    # soft: SOFTSTOP；hard: STOP
+```
+
+自动停机会停止该 OCI 账号下所有正在运行的实例。启用前建议先手动查询一次用量，并确认阈值和账号范围。
+
 ## Cloudflare DNS
 
-DNS 配置独立存放在 `config/dns.conf`，也可以通过网页 DNS 管理页面导入和管理。
+DNS 配置独立存放在 `config/dns.conf`，也可以通过网页 DNS 管理页面维护。
 
 只支持 API Token，不使用 Global API Key。Token 至少需要目标 zone 的 DNS edit 权限。
 
@@ -207,7 +266,7 @@ cloudflare=end
 
 DNS 绑定可以：
 - 手动编辑 `config/dns.conf`
-- 在网页 DNS 管理页面导入
+- 在网页 DNS 管理页面维护绑定列表
 - 在每个 VM 卡片上点击「DNS 绑定」按钮可视化配置
 
 ```ini

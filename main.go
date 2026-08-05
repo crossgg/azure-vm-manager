@@ -44,6 +44,8 @@ func main() {
 	r.POST("/api/vm/:provider/:account/:name/change-ip", changeIP)
 	r.POST("/api/vm/:provider/:account/:name/update-dns", updateDNS)
 	r.GET("/api/refresh/:provider/:account/:name", refreshVM)
+	r.GET("/api/vm/:provider/:account/:name/edit-options", getOCIInstanceEditOptions)
+	r.POST("/api/vm/:provider/:account/:name/edit", updateOCIInstance)
 	r.GET("/api/vm/:provider/:account/:name/security-lists", listOCISecurityLists)
 	r.POST("/api/vm/:provider/:account/:name/security-lists/:listID/rules", saveOCISecurityListRules)
 	r.GET("/api/vm/:provider/:account/:name/network-security-groups", listOCINetworkSecurityGroups)
@@ -220,8 +222,6 @@ func updateDNS(c *gin.Context) {
 		"logs":         logs,
 	})
 }
-
-
 
 func refreshVM(c *gin.Context) {
 	name := c.Param("name")

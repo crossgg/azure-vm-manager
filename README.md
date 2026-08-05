@@ -7,16 +7,20 @@
 当前支持：
 
 - 按配置账号手动加载机器列表
-- 开机、关机、重启
-- 更换公网 IP
-- Azure 账号余额查询
+- Azure、GCP、OCI 实例开机、关机、重启
+- Azure、GCP、OCI 更换公网 IP
+- OCI 实例编辑：修改实例名称、规格、Flex OCPU 和内存
+- OCI 编辑页按规格上限和账号剩余额度提示最大可用 OCPU / 内存，额度读取失败时自动回退到规格范围
+- OCI 安全规则管理：安全列表、网络安全组、创建并关联网络安全组、入站/出站规则编辑
+- OCI 数据传输用量监控：手动查询、周期检测、阈值提醒、超阈值自动停机
 - Cloudflare DNS 更新，使用 API Token
 - 手动更新 DNS，或在换 IP 后按开关决定是否同步 DNS
 - 网页可视化管理 DNS 绑定，每个 VM 实例可单独配置
-- DNS 管理页面：查看 Cloudflare 账号、DNS 绑定列表、导入/导出 dns.conf
+- DNS 管理页面：查看和保存 Cloudflare 账号、DNS 绑定列表、预览脱敏后的 dns.conf
 - 可选登录认证，适合需要暴露到公网的场景
 - 网页管理页修改登录账号密码，密码落盘前自动 bcrypt 加密
 - 网页管理页手动重载配置，修改配置后无需重启服务
+- 网页管理页检查更新、配置 GitHub 下载加速源并应用 Release 更新
 
 ## 目录结构
 
@@ -57,7 +61,7 @@ mkdir -p config/keys
 cp config.example.conf config/config.conf
 ```
 
-DNS 配置（Cloudflare 账号和绑定）放在 `config/dns.conf`，也可以在网页 DNS 管理页面导入或通过 VM 实例页面可视化配置。
+DNS 配置（Cloudflare 账号和绑定）放在 `config/dns.conf`，也可以在网页 DNS 管理页面维护，或通过 VM 实例页面可视化配置。
 
 密钥文件放到 `config/keys/`，配置文件里使用容器内路径 `/app/config/keys/xxx.pem`。
 
@@ -171,11 +175,60 @@ volumes:
   - ./runtime:/app/runtime
 ```
 
+## 实例管理
+
+进入「实例管理」后，先选择左侧或顶部的云账号，再加载该账号下的机器。每张 VM 卡片会显示实例名称、区域、规格、公网 IP、内网 IP、资源组/项目/区间等信息。
+
+通用操作：
+
+- 「开机」「关机」「重启」：对当前实例发送电源操作。
+- 「换 IP」：为实例更换公网 IP。不同云厂商的实现方式不同，成功后会刷新卡片。
+- 「换 IP 后更新 DNS」：只有配置了 DNS 绑定的机器才可勾选；勾选后，换 IP 成功会同步更新 Cloudflare 记录。
+- 「更新 DNS」：不换 IP，直接用当前公网 IP 更新已绑定的 Cloudflare 记录。
+- 「DNS 绑定」：打开可视化绑定面板，为当前 VM 配置一个或多个域名记录。
+
+OCI 专用操作：
+
+- 「编辑」：打开 OCI 实例编辑面板，可修改实例名称、配置规格、Flex OCPU 和内存。
+- 「安全规则」：管理主 VNIC 关联的安全列表和网络安全组规则，也可以新建网络安全组并关联到实例。
+
+### OCI 实例编辑
+
+OCI 编辑面板会尽量贴近 OCI 控制台的交互：
+
+- 先按 AMD、Intel、Ampere、专用和上一代分组展示可用规格。
+- 选择规格后，显示该规格的处理器说明、是否 Flex、最大 VNIC 数。
+- Flex 规格支持输入 OCPU 和内存，固定规格会锁定 OCPU/内存输入框。
+- OCPU / 内存提示会同时考虑规格本身范围、当前账号剩余额度、当前实例可复用资源，以及内存和 OCPU 的比例限制。
+
+如果 OCI API Key 没有读取 Limits / Resource Availability 的权限，页面不会阻塞编辑，会显示额度读取失败，并回退展示规格允许范围。最终是否能保存成功仍以 OCI UpdateInstance API 返回为准。
+
+调整运行中实例规格可能触发短暂停机。编辑面板默认勾选「允许停机完成规格变更」，提交前会再次确认。
+
+### OCI 安全规则
+
+「安全规则」面板支持两类资源：
+
+- 安全列表：读取主 VNIC 所在子网关联的 Security List，支持编辑入站/出站规则。
+- 网络安全组：读取主 VNIC 关联的 NSG，支持新增、删除、更新入站/出站规则。
+
+规则支持常用协议预设（SSH、HTTP、HTTPS、RDP 等），也可以填写 IANA 协议号；TCP/UDP 支持端口范围，ICMP 支持类型和代码。
+
+### OCI 数据传输监控
+
+选择 OCI 账号后，实例管理页会显示「OCI 数据传输用量监控」面板：
+
+- 「手动获取」：立即查询当月 VCN 出网流量。
+- 「监控设置」：配置周期检测、阈值、是否超阈值自动停机、停机方式。
+- 阈值默认按 9000 GB 设计，适合接近 OCI 免费流量上限前留出缓冲。
+
+自动停机只会停止当前 OCI 账号下正在运行的实例。启用前请确认账号范围和阈值设置。
+
 ## DNS 管理
 
 ### 网页管理
 
-- **DNS 管理页面**：查看 Cloudflare 账号（仅显示名称和备注，隐藏敏感信息）、DNS 绑定列表（支持删除）、导入 dns.conf、预览当前配置（api_token 已脱敏）
+- **DNS 管理页面**：查看和保存 Cloudflare 账号（已存在的敏感字段以掩码显示）、DNS 绑定列表（支持删除）、预览当前 dns.conf（敏感字段已脱敏）
 - **VM 实例页面**：每个 VM 卡片有「DNS 绑定」按钮，点击弹出可视化配置面板，自动填充 provider/account/vm 信息
 
 ### 配置文件
@@ -213,7 +266,7 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 
 ## 安全说明
 
-- Cloudflare API Token 和 Zone ID 不会在网页前端显示，仅在导入/保存时写入配置文件
+- Cloudflare API Token 和 Zone ID 不会在网页前端显示，仅在保存时写入配置文件
 - dns.conf 原始预览自动脱敏 `api_token`、`client_secret`、`password` 等敏感字段
 - 认证开启后，所有 API 需要登录后才能访问
 - 配置文件、密钥文件不要提交到 Git 仓库
@@ -227,8 +280,11 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 | POST | `/api/logout` | 退出登录 |
 | GET | `/api/config/status` | 查询配置加载状态 |
 | POST | `/api/config/reload` | 手动重载配置 |
+| GET | `/api/update/status` | 查询当前版本和更新状态 |
+| POST | `/api/update/apply` | 下载并应用 Release 更新 |
 | GET | `/api/settings/auth` | 查询认证配置状态 |
 | POST | `/api/settings/auth` | 修改认证配置 |
+| POST | `/api/settings/update` | 保存更新下载加速源 |
 | GET | `/api/accounts` | 获取本地配置账号列表 |
 | GET | `/api/vms?provider=&account=` | 加载指定账号机器列表 |
 | GET | `/api/vm/:provider/:account/:name` | 获取单台机器详情 |
@@ -237,9 +293,24 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 | POST | `/api/vm/:provider/:account/:name/restart` | 重启 |
 | POST | `/api/vm/:provider/:account/:name/change-ip` | 换 IP |
 | POST | `/api/vm/:provider/:account/:name/update-dns` | 更新 DNS |
-| GET | `/api/account/:provider/:account/balance` | Azure 余额 |
+| GET | `/api/refresh/:provider/:account/:name` | 刷新单台机器详情 |
+| GET | `/api/vm/:provider/:account/:name/edit-options` | OCI 实例编辑选项和最大可用 OCPU/内存 |
+| POST | `/api/vm/:provider/:account/:name/edit` | OCI 实例编辑保存 |
+| GET | `/api/vm/:provider/:account/:name/security-lists` | OCI 安全列表 |
+| POST | `/api/vm/:provider/:account/:name/security-lists/:listID/rules` | 保存 OCI 安全列表规则 |
+| GET | `/api/vm/:provider/:account/:name/network-security-groups` | OCI 网络安全组 |
+| POST | `/api/vm/:provider/:account/:name/network-security-groups` | 创建并关联 OCI 网络安全组 |
+| POST | `/api/vm/:provider/:account/:name/network-security-groups/:groupID/rules` | 保存 OCI 网络安全组规则 |
+| GET | `/api/oci/:account/data-transfer` | 手动查询 OCI 当月数据传输 |
+| GET | `/api/oci/:account/data-transfer/config` | 查询 OCI 数据传输监控配置 |
+| POST | `/api/oci/:account/data-transfer/config` | 保存 OCI 数据传输监控配置 |
+| POST | `/api/oci/:account/data-transfer/start` | 启动 OCI 数据传输周期监控 |
+| POST | `/api/oci/:account/data-transfer/stop` | 停止 OCI 数据传输周期监控 |
+| GET | `/api/oci/:account/data-transfer/status` | 查询 OCI 数据传输监控状态 |
 | GET | `/api/dns/cloudflare` | Cloudflare 账号列表（脱敏） |
+| POST | `/api/dns/cloudflare` | 保存 Cloudflare 账号 |
 | GET | `/api/dns/bindings` | DNS 绑定列表 |
+| POST | `/api/dns/bindings` | 保存 DNS 绑定列表 |
 | GET | `/api/dns/raw` | 预览 dns.conf（脱敏） |
 | POST | `/api/dns/delete-binding` | 删除 DNS 绑定 |
 | GET | `/api/vm/:provider/:account/:name/dns` | VM 的 DNS 绑定 |
