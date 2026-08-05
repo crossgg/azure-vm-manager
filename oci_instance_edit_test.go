@@ -2,18 +2,31 @@ package main
 
 import "testing"
 
-func TestQuotaNameForKind(t *testing.T) {
-	quotaNames := []string{"standard-a1-core-count", "standard-a1-memory-count"}
+func TestShapeEditLimitsUseShapeRangesOnly(t *testing.T) {
+	limits := shapeEditLimits(OCIShapeOption{
+		IsFlexible: true,
+		OCPUOptions: OCIShapeOCPUOptions{
+			Min: 1,
+			Max: 4,
+		},
+		MemoryOptions: OCIShapeMemoryOptions{
+			MinInGBs: 1,
+			MaxInGBs: 24,
+		},
+	})
 
-	if got := quotaNameForKind(quotaNames, "ocpu"); got != "standard-a1-core-count" {
-		t.Fatalf("unexpected ocpu quota name: %q", got)
+	if limits.OCPU.ShapeMin != 1 || limits.OCPU.ShapeMax != 4 || limits.OCPU.EffectiveMax != 4 {
+		t.Fatalf("unexpected OCPU limits: %+v", limits.OCPU)
 	}
-	if got := quotaNameForKind(quotaNames, "memory"); got != "standard-a1-memory-count" {
-		t.Fatalf("unexpected memory quota name: %q", got)
+	if limits.Memory.ShapeMin != 1 || limits.Memory.ShapeMax != 24 || limits.Memory.EffectiveMax != 24 {
+		t.Fatalf("unexpected memory limits: %+v", limits.Memory)
+	}
+	if limits.OCPU.HasAvailability || limits.Memory.HasAvailability {
+		t.Fatalf("did not expect resource availability in shape-only limits: %+v", limits)
 	}
 }
 
-func TestMemoryRangeForOCPUsHonorsPerOCPUAndAvailability(t *testing.T) {
+func TestMemoryRangeForOCPUsHonorsPerOCPUAndShapeMax(t *testing.T) {
 	shape := OCIShapeOption{
 		IsFlexible: true,
 		MemoryOptions: OCIShapeMemoryOptions{
@@ -23,7 +36,7 @@ func TestMemoryRangeForOCPUsHonorsPerOCPUAndAvailability(t *testing.T) {
 	}
 	limit := OCIResourceLimitInfo{
 		ShapeMin:     1,
-		ShapeMax:     64,
+		ShapeMax:     20,
 		EffectiveMax: 20,
 	}
 
@@ -32,11 +45,11 @@ func TestMemoryRangeForOCPUsHonorsPerOCPUAndAvailability(t *testing.T) {
 		t.Fatalf("expected min memory to follow per-OCPU rule, got %v", minValue)
 	}
 	if maxValue != 20 {
-		t.Fatalf("expected max memory to be capped by availability, got %v", maxValue)
+		t.Fatalf("expected max memory to be capped by shape max, got %v", maxValue)
 	}
 }
 
-func TestValidateOCIShapeConfigRejectsAvailabilityMax(t *testing.T) {
+func TestValidateOCIShapeConfigRejectsShapeMax(t *testing.T) {
 	shape := OCIShapeOption{
 		IsFlexible: true,
 		MemoryOptions: OCIShapeMemoryOptions{
@@ -47,21 +60,21 @@ func TestValidateOCIShapeConfigRejectsAvailabilityMax(t *testing.T) {
 	limits := OCIEditLimits{
 		OCPU: OCIResourceLimitInfo{
 			ShapeMin:     1,
-			ShapeMax:     4,
+			ShapeMax:     2,
 			EffectiveMax: 2,
 		},
 		Memory: OCIResourceLimitInfo{
 			ShapeMin:     1,
-			ShapeMax:     24,
+			ShapeMax:     12,
 			EffectiveMax: 12,
 		},
 	}
 
 	if err := validateOCIShapeConfig(shape, limits, 4, 12); err == nil {
-		t.Fatal("expected OCPU availability max to reject oversized payload")
+		t.Fatal("expected OCPU shape max to reject oversized payload")
 	}
 	if err := validateOCIShapeConfig(shape, limits, 2, 24); err == nil {
-		t.Fatal("expected memory availability max to reject oversized payload")
+		t.Fatal("expected memory shape max to reject oversized payload")
 	}
 	if err := validateOCIShapeConfig(shape, limits, 2, 12); err != nil {
 		t.Fatalf("expected valid shape config, got %v", err)

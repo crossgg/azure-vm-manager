@@ -194,7 +194,7 @@ OCI API Key 对应的用户/组需要能读取实例、VNIC、子网、规格、
 - 换公网 IP：需要读取 VNIC / Private IP，并能创建、删除、解绑 Public IP。
 - 安全列表：需要读取子网关联的 Security List，并能更新 Security List 规则。
 - 网络安全组：需要读取、创建、更新 Network Security Group，并能更新 VNIC 的 NSG 关联。
-- 实例编辑最大可用 OCPU / 内存提示：需要读取 Limits / Resource Availability；如果没有该权限，页面会回退显示规格允许范围。
+- 实例编辑：页面只读取 Compute Shape 规格范围，不额外查询账号剩余额度；保存时由 OCI 校验配额和实时容量。
 - 数据传输监控：需要读取 Monitoring 指标，当前通过 `oci_vcn` 的 `VnicToNetworkBytes` 汇总查询。
 
 示例策略需要根据你的 tenancy、group、compartment 名称调整：
@@ -203,8 +203,6 @@ OCI API Key 对应的用户/组需要能读取实例、VNIC、子网、规格、
 Allow group vm-manager to manage instances in compartment <compartment-name>
 Allow group vm-manager to manage virtual-network-family in compartment <compartment-name>
 Allow group vm-manager to read metrics in compartment <compartment-name>
-Allow group vm-manager to inspect limits in tenancy
-Allow group vm-manager to read resource-availability in tenancy
 ```
 
 如果只想使用查看和开关机功能，可以进一步收窄权限；如果要使用安全规则、换 IP、编辑实例、数据传输监控，则需要保留对应资源的管理或读取权限。

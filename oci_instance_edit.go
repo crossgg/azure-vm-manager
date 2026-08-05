@@ -50,7 +50,6 @@ type OCIShapeOption struct {
 	MemoryInGBs               float64               `json:"memoryInGBs"`
 	NetworkingBandwidthInGbps float64               `json:"networkingBandwidthInGbps,omitempty"`
 	MaxVnicAttachments        int                   `json:"maxVnicAttachments,omitempty"`
-	QuotaNames                []string              `json:"quotaNames,omitempty"`
 	OCPUOptions               OCIShapeOCPUOptions   `json:"ocpuOptions"`
 	MemoryOptions             OCIShapeMemoryOptions `json:"memoryOptions"`
 	ResizeCompatible          bool                  `json:"resizeCompatible"`
@@ -78,22 +77,11 @@ type OCIEditLimits struct {
 }
 
 type OCIResourceLimitInfo struct {
-	ResourceName    string  `json:"resourceName,omitempty"`
 	ShapeMin        float64 `json:"shapeMin"`
 	ShapeMax        float64 `json:"shapeMax"`
-	Available       float64 `json:"available,omitempty"`
-	Used            float64 `json:"used,omitempty"`
-	Reusable        float64 `json:"reusable,omitempty"`
 	EffectiveMax    float64 `json:"effectiveMax"`
 	HasAvailability bool    `json:"hasAvailability"`
 	Source          string  `json:"source"`
-	Error           string  `json:"error,omitempty"`
-}
-
-type ociResourceAvailability struct {
-	Available           float64
-	Used                float64
-	EffectiveQuotaValue float64
 }
 
 func getOCIInstanceEditOptions(c *gin.Context) {
@@ -181,8 +169,7 @@ func (o *OCIService) InstanceEditOptions(instanceID, selectedShapeName string) (
 		SelectedShape: selectedShape,
 	}
 	if selectedShape != nil {
-		options.Limits = o.shapeEditLimits(*selectedShape, instance, currentShape)
-		options.Warnings = o.limitWarnings(options.Limits)
+		options.Limits = shapeEditLimits(*selectedShape)
 	}
 	return options, nil
 }
@@ -326,7 +313,6 @@ func normalizeOCIShapeOption(raw map[string]interface{}, currentShape string) OC
 		MemoryInGBs:               float64InterfaceValue(raw["memoryInGBs"]),
 		NetworkingBandwidthInGbps: float64InterfaceValue(raw["networkingBandwidthInGbps"]),
 		MaxVnicAttachments:        intFromFloat(float64InterfaceValue(raw["maxVnicAttachments"])),
-		QuotaNames:                stringSliceValue(raw["quotaNames"]),
 		ResizeCompatible:          true,
 	}
 	if shape.Name == currentShape {
@@ -374,110 +360,25 @@ func firstMapValue(primary map[string]interface{}, fallback map[string]interface
 	return fallback[key]
 }
 
-func (o *OCIService) shapeEditLimits(shape OCIShapeOption, instance OCIInstanceEditInstance, currentShape *OCIShapeOption) OCIEditLimits {
+func shapeEditLimits(shape OCIShapeOption) OCIEditLimits {
 	return OCIEditLimits{
-		OCPU:   o.resourceLimitForShape("ocpu", shape, instance, currentShape),
-		Memory: o.resourceLimitForShape("memory", shape, instance, currentShape),
+		OCPU:   resourceLimitForShape("ocpu", shape),
+		Memory: resourceLimitForShape("memory", shape),
 	}
 }
 
-func (o *OCIService) resourceLimitForShape(kind string, shape OCIShapeOption, instance OCIInstanceEditInstance, currentShape *OCIShapeOption) OCIResourceLimitInfo {
+func resourceLimitForShape(kind string, shape OCIShapeOption) OCIResourceLimitInfo {
 	minValue, maxValue := shape.ocpuRange()
-	currentValue := instance.OCPUs
 	if kind == "memory" {
 		minValue, maxValue = shape.memoryRange()
-		currentValue = instance.MemoryInGBs
 	}
 
-	info := OCIResourceLimitInfo{
-		ResourceName: quotaNameForKind(shape.QuotaNames, kind),
+	return OCIResourceLimitInfo{
 		ShapeMin:     minValue,
 		ShapeMax:     maxValue,
 		EffectiveMax: maxValue,
 		Source:       "shape",
 	}
-	if info.ResourceName == "" {
-		return info
-	}
-
-	availability, err := o.computeResourceAvailability(info.ResourceName, instance.AvailabilityDomain)
-	if err != nil {
-		info.Error = err.Error()
-		return info
-	}
-
-	info.HasAvailability = true
-	info.Source = "availability"
-	info.Available = availability.Available
-	info.Used = availability.Used
-
-	if currentShape != nil && quotaNameForKind(currentShape.QuotaNames, kind) == info.ResourceName {
-		info.Reusable = currentValue
-	}
-	quotaMax := info.Available + info.Reusable
-	info.EffectiveMax = math.Min(maxValue, quotaMax)
-	return info
-}
-
-func (o *OCIService) computeResourceAvailability(limitName, availabilityDomain string) (ociResourceAvailability, error) {
-	if limitName == "" {
-		return ociResourceAvailability{}, fmt.Errorf("missing OCI limit name")
-	}
-	availability, err := o.computeResourceAvailabilityScoped(limitName, availabilityDomain)
-	if err == nil || availabilityDomain == "" || !strings.Contains(err.Error(), "400") {
-		return availability, err
-	}
-	return o.computeResourceAvailabilityScoped(limitName, "")
-}
-
-func (o *OCIService) computeResourceAvailabilityScoped(limitName, availabilityDomain string) (ociResourceAvailability, error) {
-	query := url.Values{
-		"compartmentId": {o.account.CompartmentID},
-	}
-	if availabilityDomain != "" {
-		query.Set("availabilityDomain", availabilityDomain)
-	}
-
-	var raw map[string]interface{}
-	path := "/services/compute/limits/" + url.PathEscape(limitName) + "/resourceAvailability"
-	if err := o.limitsRequestJSON("GET", path, query, nil, &raw, false); err != nil {
-		return ociResourceAvailability{}, err
-	}
-
-	available, ok := float64InterfaceValueOK(raw["fractionalAvailability"])
-	if !ok {
-		available, ok = float64InterfaceValueOK(raw["available"])
-	}
-	if !ok {
-		return ociResourceAvailability{}, fmt.Errorf("OCI did not return availability for limit %s", limitName)
-	}
-	used, _ := float64InterfaceValueOK(raw["fractionalUsage"])
-	if used == 0 {
-		used = float64InterfaceValue(raw["used"])
-	}
-
-	return ociResourceAvailability{
-		Available:           available,
-		Used:                used,
-		EffectiveQuotaValue: float64InterfaceValue(raw["effectiveQuotaValue"]),
-	}, nil
-}
-
-func (o *OCIService) limitsRequestJSON(method, path string, query url.Values, body interface{}, out interface{}, allowNotFound bool) error {
-	endpoint := o.limitsEndpoint(path, query)
-	return o.doRequest(method, endpoint, body, out, allowNotFound)
-}
-
-func (o *OCIService) limitsEndpoint(path string, query url.Values) string {
-	u := url.URL{
-		Scheme: "https",
-		Host:   "limits." + o.account.Region + ".oci.oraclecloud.com",
-		Path:   "/20181025" + path,
-	}
-	if len(query) > 0 {
-		u.RawQuery = query.Encode()
-	}
-	return u.String()
 }
 
 func validateOCIShapeConfig(shape OCIShapeOption, limits OCIEditLimits, ocpus, memoryInGBs float64) error {
@@ -575,34 +476,6 @@ func (s OCIShapeOption) defaultMemoryInGBs(ocpus float64) float64 {
 	}
 	minValue, _ := s.memoryRange()
 	return minValue
-}
-
-func (o *OCIService) limitWarnings(limits OCIEditLimits) []string {
-	warnings := []string{}
-	if limits.OCPU.Error != "" {
-		warnings = append(warnings, "无法读取 OCPU 剩余额度："+limits.OCPU.Error)
-	}
-	if limits.Memory.Error != "" {
-		warnings = append(warnings, "无法读取内存剩余额度："+limits.Memory.Error)
-	}
-	return warnings
-}
-
-func quotaNameForKind(quotaNames []string, kind string) string {
-	for _, quotaName := range quotaNames {
-		lower := strings.ToLower(quotaName)
-		switch kind {
-		case "memory":
-			if strings.Contains(lower, "memory") || strings.Contains(lower, "mem") {
-				return quotaName
-			}
-		case "ocpu":
-			if strings.Contains(lower, "ocpu") || strings.Contains(lower, "core") || strings.Contains(lower, "cpu") {
-				return quotaName
-			}
-		}
-	}
-	return ""
 }
 
 func ociShapeFamily(shape OCIShapeOption) string {

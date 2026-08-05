@@ -10,7 +10,7 @@
 - Azure、GCP、OCI 实例开机、关机、重启
 - Azure、GCP、OCI 更换公网 IP
 - OCI 实例编辑：修改实例名称、规格、Flex OCPU 和内存
-- OCI 编辑页按规格上限和账号剩余额度提示最大可用 OCPU / 内存，额度读取失败时自动回退到规格范围
+- OCI 编辑页按规格本身限制提示 OCPU / 内存可填写范围
 - OCI 安全规则管理：安全列表、网络安全组、创建并关联网络安全组、入站/出站规则编辑
 - OCI 数据传输用量监控：手动查询、周期检测、阈值提醒、超阈值自动停机
 - Cloudflare DNS 更新，使用 API Token
@@ -199,9 +199,9 @@ OCI 编辑面板会尽量贴近 OCI 控制台的交互：
 - 先按 AMD、Intel、Ampere、专用和上一代分组展示可用规格。
 - 选择规格后，显示该规格的处理器说明、是否 Flex、最大 VNIC 数。
 - Flex 规格支持输入 OCPU 和内存，固定规格会锁定 OCPU/内存输入框。
-- OCPU / 内存提示会同时考虑规格本身范围、当前账号剩余额度、当前实例可复用资源，以及内存和 OCPU 的比例限制。
+- OCPU / 内存提示会考虑规格本身范围，以及内存和 OCPU 的比例限制。
 
-如果 OCI API Key 没有读取 Limits / Resource Availability 的权限，页面不会阻塞编辑，会显示额度读取失败，并回退展示规格允许范围。最终是否能保存成功仍以 OCI UpdateInstance API 返回为准。
+编辑页不会额外查询账号剩余额度，因此不需要 OCI Limits / Resource Availability 权限。最终是否能保存成功仍以 OCI UpdateInstance API 返回为准；如果账号配额不足或当前可用容量不足，OCI 会在提交时返回失败原因。
 
 调整运行中实例规格可能触发短暂停机。编辑面板默认勾选「允许停机完成规格变更」，提交前会再次确认。
 
@@ -294,7 +294,7 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 | POST | `/api/vm/:provider/:account/:name/change-ip` | 换 IP |
 | POST | `/api/vm/:provider/:account/:name/update-dns` | 更新 DNS |
 | GET | `/api/refresh/:provider/:account/:name` | 刷新单台机器详情 |
-| GET | `/api/vm/:provider/:account/:name/edit-options` | OCI 实例编辑选项和最大可用 OCPU/内存 |
+| GET | `/api/vm/:provider/:account/:name/edit-options` | OCI 实例编辑选项和规格范围 |
 | POST | `/api/vm/:provider/:account/:name/edit` | OCI 实例编辑保存 |
 | GET | `/api/vm/:provider/:account/:name/security-lists` | OCI 安全列表 |
 | POST | `/api/vm/:provider/:account/:name/security-lists/:listID/rules` | 保存 OCI 安全列表规则 |

@@ -1461,11 +1461,7 @@ function updateOCIEditRangeHints() {
   if (!shape.isFlexible) {
     notes.push('当前选择的是固定规格，OCPU 和内存会随规格自动确定。');
   }
-  if (ociEditOptions.limits?.ocpu?.hasAvailability || ociEditOptions.limits?.memory?.hasAvailability) {
-    notes.push('最大值已按规格上限与当前账号剩余额度计算。');
-  } else {
-    notes.push('未读取到账号剩余额度，当前仅显示规格允许范围。');
-  }
+  notes.push('当前仅显示规格允许范围；账号配额和实时容量由 OCI 在保存时最终校验。');
   noteEl.textContent = notes.join(' ');
 }
 
@@ -1493,14 +1489,7 @@ function ociEditComputedRanges() {
 
 function ociRangeText(label, min, max, limit = {}, unit = '') {
   const suffix = unit ? ` ${unit}` : '';
-  const sourceText = limit?.hasAvailability
-    ? `最大可用 ${formatOCIAmount(max)}${suffix}（规格上限 ${formatOCIAmount(limit.shapeMax || max)}${suffix}）`
-    : `规格范围 ${formatOCIAmount(min)} - ${formatOCIAmount(limit.shapeMax || max)}${suffix}`;
-  const availability = limit?.hasAvailability
-    ? `，剩余额度 ${formatOCIAmount(limit.available || 0)}${suffix}${limit.reusable ? `，当前实例可复用 ${formatOCIAmount(limit.reusable)}${suffix}` : ''}`
-    : '';
-  const errorText = limit?.error ? `；额度读取失败：${limit.error}` : '';
-  return `${label} 应介于 ${formatOCIAmount(min)} 和 ${formatOCIAmount(max)}${suffix} 之间。${sourceText}${availability}${errorText}`;
+  return `${label} 应介于 ${formatOCIAmount(min)} 和 ${formatOCIAmount(max)}${suffix} 之间。规格范围 ${formatOCIAmount(min)} - ${formatOCIAmount(limit.shapeMax || max)}${suffix}`;
 }
 
 function renderOCIEditWarnings(warnings) {
