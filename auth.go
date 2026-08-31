@@ -171,11 +171,11 @@ func (a *AuthService) indexPage(c *gin.Context) {
 	noStore(c)
 	if a.Enabled() {
 		if _, ok := a.validSession(c); !ok {
-			c.File("./public/login.html")
+			c.File(publicAssetPath("login.html"))
 			return
 		}
 	}
-	c.File("./public/index.html")
+	c.File(publicAssetPath("index.html"))
 }
 
 func (a *AuthService) loginPage(c *gin.Context) {
@@ -188,7 +188,7 @@ func (a *AuthService) loginPage(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/")
 		return
 	}
-	c.File("./public/login.html")
+	c.File(publicAssetPath("login.html"))
 }
 
 func (a *AuthService) publicFile(c *gin.Context) {
@@ -204,7 +204,7 @@ func (a *AuthService) publicFile(c *gin.Context) {
 			return
 		}
 	}
-	c.File(filepath.Join("public", strings.TrimPrefix(requested, "/")))
+	c.File(filepath.Join(activePublicDir(), strings.TrimPrefix(requested, "/")))
 }
 
 func isLoginAsset(requested string) bool {

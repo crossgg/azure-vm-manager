@@ -53,9 +53,9 @@ type updateInfo struct {
 
 func getUpdateStatus(c *gin.Context) {
 	info := updateInfo{
-		CurrentVersion:  version,
-		RuntimePath:     runtimeBinPath,
-		DownloadProxy:   defaultDownloadProxy(),
+		CurrentVersion: version,
+		RuntimePath:    runtimeBinPath,
+		DownloadProxy:  defaultDownloadProxy(),
 	}
 
 	if c.Query("check") == "true" {
@@ -142,7 +142,7 @@ func fetchLatestRelease(downloadProxy string) (githubRelease, error) {
 		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	}
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer " + token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
@@ -214,18 +214,96 @@ func installReleaseAsset(release githubRelease, asset githubReleaseAsset, downlo
 	if err := os.Chmod(tempBinPath, 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(tempBinPath, runtimeBinPath); err != nil {
-		return err
-	}
 
+	var publicReplacement *directoryReplacement
 	if hasPublic {
-		_ = os.RemoveAll("./public")
-		if err := os.Rename(tempPublicPath, "./public"); err != nil {
-			return fmt.Errorf("failed to move updated public dir: %v", err)
+		publicReplacement, err = replaceDirectory(tempPublicPath, runtimePublicDir)
+		if err != nil {
+			return fmt.Errorf("install updated public dir: %w", err)
 		}
 	}
 
+	if err := os.Rename(tempBinPath, runtimeBinPath); err != nil {
+		if publicReplacement != nil {
+			if rollbackErr := publicReplacement.rollback(); rollbackErr != nil {
+				return fmt.Errorf("install runtime binary: %v; restore public dir: %w", err, rollbackErr)
+			}
+		}
+		return fmt.Errorf("install runtime binary: %w", err)
+	}
+	if publicReplacement != nil {
+		_ = publicReplacement.commit()
+	}
+
 	return nil
+}
+
+type directoryReplacement struct {
+	target    string
+	backup    string
+	hadTarget bool
+}
+
+func replaceDirectory(source, target string) (*directoryReplacement, error) {
+	info, err := os.Stat(source)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("source %s is not a directory", source)
+	}
+	if filepath.Clean(source) == filepath.Clean(target) {
+		return nil, fmt.Errorf("source and target directories must differ")
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return nil, err
+	}
+
+	replacement := &directoryReplacement{
+		target: target,
+		backup: target + ".previous",
+	}
+	if err := os.RemoveAll(replacement.backup); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(target); err == nil {
+		replacement.hadTarget = true
+		if err := os.Rename(target, replacement.backup); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	if err := os.Rename(source, target); err != nil {
+		if replacement.hadTarget {
+			if restoreErr := os.Rename(replacement.backup, target); restoreErr != nil {
+				return nil, fmt.Errorf("replace directory: %v; restore previous directory: %w", err, restoreErr)
+			}
+		}
+		return nil, err
+	}
+	return replacement, nil
+}
+
+func (r *directoryReplacement) rollback() error {
+	if r == nil {
+		return nil
+	}
+	if err := os.RemoveAll(r.target); err != nil {
+		return err
+	}
+	if r.hadTarget {
+		return os.Rename(r.backup, r.target)
+	}
+	return nil
+}
+
+func (r *directoryReplacement) commit() error {
+	if r == nil || !r.hadTarget {
+		return nil
+	}
+	return os.RemoveAll(r.backup)
 }
 
 func downloadFile(url, dest string) error {

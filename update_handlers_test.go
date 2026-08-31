@@ -52,3 +52,77 @@ func TestProxiedDownloadURL(t *testing.T) {
 		t.Fatalf("proxiedDownloadURL = %q, want %q", got, want)
 	}
 }
+
+func TestReplaceDirectoryRollback(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "public")
+	source := filepath.Join(root, "update", "public")
+	writeTestAsset(t, filepath.Join(target, "index.html"), "old")
+	writeTestAsset(t, filepath.Join(source, "index.html"), "new")
+
+	replacement, err := replaceDirectory(source, target)
+	if err != nil {
+		t.Fatalf("replaceDirectory returned error: %v", err)
+	}
+	assertTestAsset(t, filepath.Join(target, "index.html"), "new")
+	if err := replacement.rollback(); err != nil {
+		t.Fatalf("rollback returned error: %v", err)
+	}
+	assertTestAsset(t, filepath.Join(target, "index.html"), "old")
+}
+
+func TestReplaceDirectoryCommit(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "public")
+	source := filepath.Join(root, "update", "public")
+	writeTestAsset(t, filepath.Join(target, "index.html"), "old")
+	writeTestAsset(t, filepath.Join(source, "index.html"), "new")
+
+	replacement, err := replaceDirectory(source, target)
+	if err != nil {
+		t.Fatalf("replaceDirectory returned error: %v", err)
+	}
+	if err := replacement.commit(); err != nil {
+		t.Fatalf("commit returned error: %v", err)
+	}
+	assertTestAsset(t, filepath.Join(target, "index.html"), "new")
+	if _, err := os.Stat(target + ".previous"); !os.IsNotExist(err) {
+		t.Fatalf("expected backup directory to be removed, got %v", err)
+	}
+}
+
+func TestSelectPublicDirPrefersCompleteRuntimeUpdate(t *testing.T) {
+	root := t.TempDir()
+	updated := filepath.Join(root, "runtime", "public")
+	bundled := filepath.Join(root, "bundled", "public")
+	writeTestAsset(t, filepath.Join(bundled, "index.html"), "bundled")
+
+	if got := selectPublicDir(updated, bundled); got != bundled {
+		t.Fatalf("selectPublicDir without update = %q, want %q", got, bundled)
+	}
+	writeTestAsset(t, filepath.Join(updated, "index.html"), "updated")
+	if got := selectPublicDir(updated, bundled); got != updated {
+		t.Fatalf("selectPublicDir with update = %q, want %q", got, updated)
+	}
+}
+
+func writeTestAsset(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertTestAsset(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want {
+		t.Fatalf("asset %s = %q, want %q", path, data, want)
+	}
+}
