@@ -3,6 +3,9 @@ const API_BASE = '';
 let currentVMs = [];
 let selectedAccount = null;
 let authEnabled = false;
+let proxyPool = [];
+let proxyBindings = [];
+let proxyAccounts = [];
 
 const els = {};
 
@@ -63,6 +66,9 @@ function bindNavigation() {
       if (section === 'dns') {
         loadDNSPage();
       }
+      if (section === 'proxies') {
+        loadProxyPage();
+      }
     });
   });
 }
@@ -77,6 +83,15 @@ function bindActions() {
   els.saveUpdateProxyBtn?.addEventListener('click', saveUpdateProxy);
   els.updateProxyMode?.addEventListener('change', updateProxyModeChanged);
   els.authForm.addEventListener('submit', saveAuthSettings);
+  document.getElementById('proxy-create-form')?.addEventListener('submit', createProxyEntry);
+  document.getElementById('proxy-import-toggle')?.addEventListener('click', toggleProxyImport);
+  document.getElementById('proxy-import-submit')?.addEventListener('click', importProxyEntries);
+  document.getElementById('proxy-refresh-btn')?.addEventListener('click', loadProxyPage);
+  document.getElementById('proxy-list')?.addEventListener('click', handleProxyRowAction);
+  document.getElementById('proxy-binding-form')?.addEventListener('submit', saveProxyBinding);
+  document.getElementById('proxy-binding-account')?.addEventListener('change', applySelectedAccountBinding);
+  document.getElementById('proxy-binding-primary')?.addEventListener('change', renderProxySelectors);
+  document.getElementById('proxy-bindings-list')?.addEventListener('click', handleProxyBindingAction);
   document.addEventListener('click', event => {
     // 1. Toggle for Level 2 (instances menu)
     const instToggle = event.target.closest('#instances-toggle-btn');
@@ -226,6 +241,7 @@ async function fetchAccounts() {
   try {
     const accounts = await fetchJSON('/api/accounts');
     const accountsArr = Array.isArray(accounts) ? accounts : [];
+    proxyAccounts = accountsArr;
     renderAccounts(accountsArr);
     renderSidebarAccounts(accountsArr);
   } catch (error) {
@@ -723,6 +739,327 @@ function cardToAccount(card) {
     account: card.dataset.account,
     group: card.dataset.group
   };
+}
+
+async function loadProxyPage() {
+  const list = document.getElementById('proxy-list');
+  const bindingsList = document.getElementById('proxy-bindings-list');
+  if (!list || !bindingsList) return;
+  list.innerHTML = '<div class="empty-state compact">正在读取代理池...</div>';
+
+  try {
+    const [proxyData, accounts] = await Promise.all([
+      fetchJSON('/api/proxies'),
+      fetchJSON('/api/accounts')
+    ]);
+    proxyPool = Array.isArray(proxyData.proxies) ? proxyData.proxies : [];
+    proxyBindings = Array.isArray(proxyData.bindings) ? proxyData.bindings : [];
+    proxyAccounts = Array.isArray(accounts) ? accounts : [];
+    renderProxyPool();
+    renderProxyBindingAccounts();
+    renderProxySelectors();
+    applySelectedAccountBinding();
+    renderProxyBindings();
+    const summary = document.getElementById('proxy-pool-summary');
+    if (summary) {
+      const path = proxyData.configPath ? ` · ${proxyData.configPath}` : '';
+      summary.textContent = `${proxyPool.length} 个代理 · ${proxyBindings.length} 个账号绑定${path}`;
+    }
+  } catch (error) {
+    list.innerHTML = `<div class="empty-state compact error">读取失败：${escapeHtml(error.message)}</div>`;
+    showProxyMessage('proxy-create-message', error.message, true);
+  }
+}
+
+function renderProxyPool() {
+  const list = document.getElementById('proxy-list');
+  if (!list) return;
+  if (proxyPool.length === 0) {
+    list.innerHTML = '<div class="empty-state compact">代理池为空。</div>';
+    return;
+  }
+  list.innerHTML = proxyPool.map(proxy => {
+    const protocol = proxyProtocolLabel(proxy.url);
+    return `
+      <div class="proxy-row" data-proxy-id="${escapeAttr(proxy.id)}">
+        <span class="proxy-protocol-badge">${escapeHtml(protocol)}</span>
+        <input class="proxy-row-input proxy-url-input mono" type="text" value="${escapeAttr(proxy.url)}" aria-label="代理地址">
+        <input class="proxy-row-input proxy-remark-input" type="text" maxlength="160" value="${escapeAttr(proxy.remark || '')}" placeholder="备注" aria-label="代理备注">
+        <span class="proxy-status" data-proxy-status><i class="bi bi-circle"></i><span>未测试</span></span>
+        <span class="proxy-row-actions">
+          <button class="proxy-icon-btn" type="button" data-proxy-action="save" title="保存代理"><i class="bi bi-floppy"></i></button>
+          <button class="proxy-icon-btn" type="button" data-proxy-action="test" title="测试代理"><i class="bi bi-speedometer2"></i></button>
+          <button class="proxy-icon-btn danger" type="button" data-proxy-action="delete" title="删除代理"><i class="bi bi-trash3"></i></button>
+        </span>
+      </div>`;
+  }).join('');
+}
+
+function proxyProtocolLabel(rawURL) {
+  const scheme = String(rawURL || '').split(':', 1)[0].toUpperCase();
+  return scheme.startsWith('SOCK') ? 'SOCKS5' : 'HTTP';
+}
+
+async function createProxyEntry(event) {
+  event.preventDefault();
+  const protocol = document.getElementById('proxy-create-protocol').value;
+  const addressInput = document.getElementById('proxy-create-address');
+  const remarkInput = document.getElementById('proxy-create-remark');
+  let address = addressInput.value.trim();
+  if (!address.includes('://')) address = `${protocol}://${address}`;
+  showProxyMessage('proxy-create-message', '正在添加...', false);
+  try {
+    await fetchJSON('/api/proxies', {
+      method: 'POST',
+      body: { url: address, remark: remarkInput.value.trim() }
+    });
+    addressInput.value = '';
+    remarkInput.value = '';
+    showProxyMessage('proxy-create-message', '代理已添加。', false);
+    addLog('代理池已添加一条代理。', 'success');
+    await loadProxyPage();
+  } catch (error) {
+    showProxyMessage('proxy-create-message', error.message, true);
+  }
+}
+
+function toggleProxyImport() {
+  const panel = document.getElementById('proxy-import-panel');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) document.getElementById('proxy-import-content')?.focus();
+}
+
+async function importProxyEntries() {
+  const content = document.getElementById('proxy-import-content')?.value || '';
+  showProxyMessage('proxy-import-message', '正在导入...', false);
+  try {
+    const result = await fetchJSON('/api/proxies/import', {
+      method: 'POST',
+      body: { content }
+    });
+    document.getElementById('proxy-import-content').value = '';
+    showProxyMessage('proxy-import-message', `已导入 ${result.imported} 条代理。`, false);
+    addLog(`代理池批量导入 ${result.imported} 条代理。`, 'success');
+    await loadProxyPage();
+  } catch (error) {
+    showProxyMessage('proxy-import-message', error.message, true);
+  }
+}
+
+async function handleProxyRowAction(event) {
+  const button = event.target.closest('[data-proxy-action]');
+  if (!button) return;
+  const row = button.closest('.proxy-row');
+  const proxyID = row?.dataset.proxyId;
+  if (!row || !proxyID) return;
+  const action = button.dataset.proxyAction;
+
+  if (action === 'delete') {
+    if (!confirm('删除此代理？使用它作为主代理的账号绑定也会被删除。')) return;
+    button.disabled = true;
+    try {
+      await fetchJSON(`/api/proxies/${encodeURIComponent(proxyID)}`, { method: 'DELETE' });
+      addLog('代理已删除。', 'success');
+      await loadProxyPage();
+    } catch (error) {
+      showProxyMessage('proxy-create-message', error.message, true);
+      button.disabled = false;
+    }
+    return;
+  }
+
+  if (action === 'save') {
+    button.disabled = true;
+    try {
+      await fetchJSON(`/api/proxies/${encodeURIComponent(proxyID)}`, {
+        method: 'PUT',
+        body: {
+          url: row.querySelector('.proxy-url-input').value.trim(),
+          remark: row.querySelector('.proxy-remark-input').value.trim()
+        }
+      });
+      showProxyMessage('proxy-create-message', '代理修改已保存。', false);
+      await loadProxyPage();
+    } catch (error) {
+      showProxyMessage('proxy-create-message', error.message, true);
+      button.disabled = false;
+    }
+    return;
+  }
+
+  if (action === 'test') {
+    const status = row.querySelector('[data-proxy-status]');
+    button.disabled = true;
+    status.className = 'proxy-status';
+    status.innerHTML = '<i class="bi bi-arrow-repeat"></i><span>测试中</span>';
+    try {
+      const result = await fetchJSON(`/api/proxies/${encodeURIComponent(proxyID)}/test`, { method: 'POST' });
+      if (result.success) {
+        status.className = 'proxy-status success';
+        status.innerHTML = `<i class="bi bi-check-circle"></i><span>${escapeHtml(result.latencyMs)} ms</span>`;
+      } else {
+        status.className = 'proxy-status error';
+        status.innerHTML = `<i class="bi bi-x-circle"></i><span title="${escapeAttr(result.error || '连接失败')}">连接失败</span>`;
+      }
+    } catch (error) {
+      status.className = 'proxy-status error';
+      status.innerHTML = `<i class="bi bi-x-circle"></i><span title="${escapeAttr(error.message)}">测试失败</span>`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+}
+
+function renderProxyBindingAccounts() {
+  const select = document.getElementById('proxy-binding-account');
+  if (!select) return;
+  const previous = select.value;
+  if (proxyAccounts.length === 0) {
+    select.innerHTML = '<option value="">无可用云账号</option>';
+    select.disabled = true;
+    const submit = document.querySelector('.proxy-binding-submit');
+    if (submit) submit.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  const submit = document.querySelector('.proxy-binding-submit');
+  if (submit) submit.disabled = proxyPool.length === 0;
+  select.innerHTML = proxyAccounts.map((account, index) => `
+    <option value="${index}" data-provider="${escapeAttr(account.provider)}" data-account="${escapeAttr(account.account)}">
+      ${escapeHtml(account.provider.toUpperCase())} / ${escapeHtml(account.account)}
+    </option>`).join('');
+  if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+}
+
+function renderProxySelectors() {
+  const primary = document.getElementById('proxy-binding-primary');
+  const fallback = document.getElementById('proxy-binding-fallback');
+  if (!primary || !fallback) return;
+  const currentPrimary = primary.value;
+  const currentFallback = fallback.value;
+  if (proxyPool.length === 0) {
+    primary.innerHTML = '<option value="">请先添加代理</option>';
+    fallback.innerHTML = '<option value="">直连</option>';
+    primary.disabled = true;
+    fallback.disabled = true;
+    const submit = document.querySelector('.proxy-binding-submit');
+    if (submit) submit.disabled = true;
+    return;
+  }
+  primary.disabled = false;
+  fallback.disabled = false;
+  const submit = document.querySelector('.proxy-binding-submit');
+  if (submit) submit.disabled = proxyAccounts.length === 0;
+  primary.innerHTML = proxyPool.map(proxy => `<option value="${escapeAttr(proxy.id)}">${escapeHtml(proxyOptionLabel(proxy))}</option>`).join('');
+  if (proxyPool.some(proxy => proxy.id === currentPrimary)) primary.value = currentPrimary;
+  const selectedPrimary = primary.value;
+  fallback.innerHTML = '<option value="">直连</option>' + proxyPool
+    .filter(proxy => proxy.id !== selectedPrimary)
+    .map(proxy => `<option value="${escapeAttr(proxy.id)}">${escapeHtml(proxyOptionLabel(proxy))}</option>`)
+    .join('');
+  if (proxyPool.some(proxy => proxy.id === currentFallback && proxy.id !== selectedPrimary)) fallback.value = currentFallback;
+}
+
+function applySelectedAccountBinding() {
+  const accountOption = document.getElementById('proxy-binding-account')?.selectedOptions[0];
+  const primary = document.getElementById('proxy-binding-primary');
+  const fallback = document.getElementById('proxy-binding-fallback');
+  if (!accountOption || !primary || !fallback || proxyPool.length === 0) return;
+  const binding = proxyBindings.find(item =>
+    item.provider === accountOption.dataset.provider && item.account === accountOption.dataset.account
+  );
+  primary.value = binding && proxyPool.some(proxy => proxy.id === binding.proxyId)
+    ? binding.proxyId
+    : proxyPool[0].id;
+  renderProxySelectors();
+  fallback.value = binding && proxyPool.some(proxy => proxy.id === binding.fallbackProxyId && proxy.id !== primary.value)
+    ? binding.fallbackProxyId
+    : '';
+}
+
+function proxyOptionLabel(proxy) {
+  return proxy.remark ? `${proxy.remark} · ${redactProxyURL(proxy.url)}` : redactProxyURL(proxy.url);
+}
+
+function redactProxyURL(rawURL) {
+  try {
+    const parsed = new URL(rawURL);
+    if (parsed.password) parsed.password = '*****';
+    return parsed.toString();
+  } catch (error) {
+    return rawURL;
+  }
+}
+
+async function saveProxyBinding(event) {
+  event.preventDefault();
+  const accountOption = document.getElementById('proxy-binding-account').selectedOptions[0];
+  const provider = accountOption?.dataset.provider || '';
+  const account = accountOption?.dataset.account || '';
+  const proxyId = document.getElementById('proxy-binding-primary').value;
+  const fallbackProxyId = document.getElementById('proxy-binding-fallback').value;
+  showProxyMessage('proxy-binding-message', '正在保存绑定...', false);
+  try {
+    await fetchJSON('/api/proxy-bindings', {
+      method: 'PUT',
+      body: { provider, account, proxyId, fallbackProxyId }
+    });
+    showProxyMessage('proxy-binding-message', '账号代理绑定已生效。', false);
+    addLog(`账号代理绑定已保存：${provider}/${account}`, 'success');
+    await loadProxyPage();
+  } catch (error) {
+    showProxyMessage('proxy-binding-message', error.message, true);
+  }
+}
+
+function renderProxyBindings() {
+  const list = document.getElementById('proxy-bindings-list');
+  if (!list) return;
+  if (proxyBindings.length === 0) {
+    list.innerHTML = '<div class="empty-state compact">暂无账号绑定。</div>';
+    return;
+  }
+  list.innerHTML = proxyBindings.map(binding => {
+    const primary = proxyPool.find(proxy => proxy.id === binding.proxyId);
+    const fallback = proxyPool.find(proxy => proxy.id === binding.fallbackProxyId);
+    const route = `${primary ? proxyOptionLabel(primary) : binding.proxyId} → ${fallback ? proxyOptionLabel(fallback) : '直连'}`;
+    return `
+      <div class="proxy-binding-row"
+        data-provider="${escapeAttr(binding.provider)}"
+        data-account="${escapeAttr(binding.account)}">
+        <span class="proxy-binding-target">${escapeHtml(binding.provider.toUpperCase())} / ${escapeHtml(binding.account)}</span>
+        <span class="proxy-binding-route">${escapeHtml(route)}</span>
+        <button class="proxy-icon-btn danger" type="button" data-binding-action="delete" title="解除绑定"><i class="bi bi-x-lg"></i></button>
+      </div>`;
+  }).join('');
+}
+
+async function handleProxyBindingAction(event) {
+  const button = event.target.closest('[data-binding-action="delete"]');
+  if (!button) return;
+  const row = button.closest('.proxy-binding-row');
+  if (!row) return;
+  button.disabled = true;
+  const query = new URLSearchParams({
+    provider: row.dataset.provider,
+    account: row.dataset.account
+  });
+  try {
+    await fetchJSON(`/api/proxy-bindings?${query}`, { method: 'DELETE' });
+    addLog(`已解除账号代理绑定：${row.dataset.provider}/${row.dataset.account}`, 'success');
+    await loadProxyPage();
+  } catch (error) {
+    showProxyMessage('proxy-binding-message', error.message, true);
+    button.disabled = false;
+  }
+}
+
+function showProxyMessage(elementID, message, isError) {
+  const element = document.getElementById(elementID);
+  if (!element) return;
+  element.textContent = message;
+  element.className = `form-message ${isError ? 'error' : 'success'}`;
 }
 
 async function fetchJSON(path, options = {}) {

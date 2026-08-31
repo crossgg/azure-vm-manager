@@ -17,6 +17,8 @@
 - 手动更新 DNS，或在换 IP 后按开关决定是否同步 DNS
 - 网页可视化管理 DNS 绑定，每个 VM 实例可单独配置
 - DNS 管理页面：查看和保存 Cloudflare 账号、DNS 绑定列表、预览脱敏后的 dns.conf
+- 代理池：手动添加或逐行批量导入 HTTP / SOCKS5 代理，支持备注和连通性测试
+- Azure、GCP、OCI 账号可绑定主代理和 fallback 代理；未配置 fallback 代理时自动回退直连
 - 可选登录认证，适合需要暴露到公网的场景
 - 网页管理页修改登录账号密码，密码落盘前自动 bcrypt 加密
 - 网页管理页手动重载配置，修改配置后无需重启服务
@@ -28,6 +30,7 @@
 config/                  # 配置目录（Docker 映射 /app/config）
 ├── config.conf          # 主配置：云账号 + 认证
 ├── dns.conf             # DNS 配置：Cloudflare 账号 + DNS 绑定
+├── proxy.conf           # 代理池 + 账号代理绑定（网页自动创建）
 └── keys/                # 密钥文件目录
     ├── gcp01.pem
     └── oci.pem
@@ -62,6 +65,8 @@ cp config.example.conf config/config.conf
 ```
 
 DNS 配置（Cloudflare 账号和绑定）放在 `config/dns.conf`，也可以在网页 DNS 管理页面维护，或通过 VM 实例页面可视化配置。
+
+代理配置放在 `config/proxy.conf`，通常直接在网页「代理池」页面维护。
 
 密钥文件放到 `config/keys/`，配置文件里使用容器内路径 `/app/config/keys/xxx.pem`。
 
@@ -224,6 +229,35 @@ OCI 编辑面板会尽量贴近 OCI 控制台的交互：
 
 自动停机只会停止当前 OCI 账号下正在运行的实例。启用前请确认账号范围和阈值设置。
 
+## 代理池
+
+代理池页面支持 HTTP、HTTPS 和 SOCKS5 代理。手动添加时填写 `host:port` 或 `user:password@host:port`；批量导入每行一条：
+
+```text
+http://user:password@127.0.0.1:8080 # 东京出口
+socks5://127.0.0.1:1080 # 备用线路
+```
+
+账号绑定按 `provider/account` 精确匹配。绑定后，该账号的令牌、实例列表与详情、账单/监控、状态操作、换 IP、OCI 编辑与安全规则等所有官方云 API 请求均使用主代理；主代理发生连接错误或返回代理网关错误时，切换到所选 fallback。fallback 可选择池内另一条代理，默认值为直连。
+
+`proxy.conf` 由页面自动创建和维护：
+
+```ini
+proxy=begin
+[proxy-example]
+url=http://127.0.0.1:8080
+remark=东京出口
+proxy=end
+
+proxy_binding=begin
+[binding-1]
+provider=azure
+account=az001
+proxy=proxy-example
+fallback=direct
+proxy_binding=end
+```
+
 ## DNS 管理
 
 ### 网页管理
@@ -267,6 +301,7 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 ## 安全说明
 
 - Cloudflare API Token 和 Zone ID 不会在网页前端显示，仅在保存时写入配置文件
+- 代理 URL 中的密码在代理池页面和 API 列表响应中以掩码显示
 - dns.conf 原始预览自动脱敏 `api_token`、`client_secret`、`password` 等敏感字段
 - 认证开启后，所有 API 需要登录后才能访问
 - 配置文件、密钥文件不要提交到 Git 仓库
@@ -286,6 +321,14 @@ Cloudflare 使用 API Token（不使用 Global API Key）。
 | POST | `/api/settings/auth` | 修改认证配置 |
 | POST | `/api/settings/update` | 保存更新下载加速源 |
 | GET | `/api/accounts` | 获取本地配置账号列表 |
+| GET | `/api/proxies` | 获取代理池和账号绑定 |
+| POST | `/api/proxies` | 添加代理 |
+| POST | `/api/proxies/import` | 逐行批量导入代理 |
+| PUT | `/api/proxies/:id` | 修改代理和备注 |
+| DELETE | `/api/proxies/:id` | 删除代理 |
+| POST | `/api/proxies/:id/test` | 测试代理到 Azure 管理端点的连通性 |
+| PUT | `/api/proxy-bindings` | 新增或更新账号代理绑定 |
+| DELETE | `/api/proxy-bindings?provider=&account=` | 删除账号代理绑定 |
 | GET | `/api/vms?provider=&account=` | 加载指定账号机器列表 |
 | GET | `/api/vm/:provider/:account/:name` | 获取单台机器详情 |
 | POST | `/api/vm/:provider/:account/:name/start` | 开机 |

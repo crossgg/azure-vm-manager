@@ -53,6 +53,10 @@
             <span class="nav-toggle" id="instances-toggle-btn"><i class="bi bi-plus-lg"></i></span>
           </a>
           <div class="sub-nav-menu collapsed" id="sidebar-accounts-menu" style="display: none;"></div>
+          <a href="#" class="nav-item" data-section="proxies">
+            <i class="bi bi-hdd-network"></i>
+            <span>代理池</span>
+          </a>
           <a href="#" class="nav-item" data-section="dns">
             <i class="bi bi-globe"></i>
             <span>DNS 管理</span>
@@ -190,6 +194,105 @@
 
           <div id="vm-list" class="vm-list">
             <div class="empty-state">请选择一个账号加载机器。</div>
+          </div>
+        </section>
+
+        <section id="proxies-section" class="section">
+          <div class="section-title">
+            <div>
+              <h2>代理池</h2>
+              <p id="proxy-pool-summary">正在读取代理配置...</p>
+            </div>
+            <button id="proxy-import-toggle" class="secondary-btn" type="button">
+              <i class="bi bi-file-earmark-arrow-up"></i>
+              <span>批量导入</span>
+            </button>
+          </div>
+
+          <form id="proxy-create-form" class="settings-panel proxy-create-panel">
+            <div class="panel-heading">
+              <div><h3>添加代理</h3></div>
+            </div>
+            <div class="proxy-create-grid">
+              <label class="field">
+                <span>协议</span>
+                <select id="proxy-create-protocol">
+                  <option value="http">HTTP</option>
+                  <option value="socks5">SOCKS5</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>代理地址</span>
+                <input id="proxy-create-address" type="text" autocomplete="off" placeholder="user:password@127.0.0.1:8080" required>
+              </label>
+              <label class="field">
+                <span>备注</span>
+                <input id="proxy-create-remark" type="text" maxlength="160" placeholder="例如：东京出口">
+              </label>
+              <button class="primary-btn proxy-submit-btn" type="submit">
+                <i class="bi bi-plus-lg"></i>
+                <span>添加</span>
+              </button>
+            </div>
+            <div id="proxy-create-message" class="form-message"></div>
+          </form>
+
+          <div id="proxy-import-panel" class="settings-panel proxy-import-panel" hidden>
+            <div class="panel-heading">
+              <div><h3>批量导入</h3></div>
+            </div>
+            <label class="field">
+              <span>代理列表</span>
+              <textarea id="proxy-import-content" class="proxy-import-textarea" rows="7" spellcheck="false" placeholder="http://user:password@127.0.0.1:8080 # 东京出口&#10;socks5://127.0.0.1:1080 # 备用线路"></textarea>
+            </label>
+            <button id="proxy-import-submit" class="primary-btn" type="button">
+              <i class="bi bi-file-earmark-arrow-up"></i>
+              <span>导入</span>
+            </button>
+            <div id="proxy-import-message" class="form-message"></div>
+          </div>
+
+          <div class="settings-panel proxy-list-panel">
+            <div class="panel-heading">
+              <div><h3>代理列表</h3></div>
+              <button id="proxy-refresh-btn" class="ghost-btn" type="button" title="刷新代理池">
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+            </div>
+            <div class="proxy-table-head" aria-hidden="true">
+              <span>协议</span><span>地址</span><span>备注</span><span>状态</span><span>操作</span>
+            </div>
+            <div id="proxy-list" class="proxy-list">
+              <div class="empty-state compact">加载中...</div>
+            </div>
+          </div>
+
+          <div class="settings-panel proxy-bindings-panel">
+            <div class="panel-heading">
+              <div><h3>账号绑定</h3></div>
+            </div>
+            <form id="proxy-binding-form" class="proxy-binding-form">
+              <label class="field">
+                <span>云账号</span>
+                <select id="proxy-binding-account" required></select>
+              </label>
+              <label class="field">
+                <span>主代理</span>
+                <select id="proxy-binding-primary" required></select>
+              </label>
+              <label class="field">
+                <span>Fallback</span>
+                <select id="proxy-binding-fallback"></select>
+              </label>
+              <button class="primary-btn proxy-binding-submit" type="submit">
+                <i class="bi bi-link-45deg"></i>
+                <span>保存绑定</span>
+              </button>
+            </form>
+            <div id="proxy-binding-message" class="form-message"></div>
+            <div id="proxy-bindings-list" class="proxy-bindings-list">
+              <div class="empty-state compact">暂无账号绑定。</div>
+            </div>
           </div>
         </section>
 

@@ -15,11 +15,14 @@ type Config struct {
 	Default       DefaultConfig      `yaml:"default"`
 	SourcePath    string             `yaml:"-"`
 	DNSPath       string             `yaml:"-"`
+	ProxyPath     string             `yaml:"-"`
 	AzureAccounts []AzureConfig      `yaml:"-"`
 	GCPAccounts   []GCPConfig        `yaml:"-"`
 	OCIAccounts   []OCIConfig        `yaml:"-"`
 	Cloudflare    []CloudflareConfig `yaml:"-"`
 	DNSBindings   []DNSBinding       `yaml:"-"`
+	Proxies       []ProxyConfig      `yaml:"-"`
+	ProxyBindings []ProxyBinding     `yaml:"-"`
 	Auth          AuthConfig         `yaml:"auth"`
 	Update        UpdateConfig       `yaml:"update"`
 }
@@ -112,6 +115,13 @@ func dnsConfigPath(mainPath string) string {
 	return "dns.conf"
 }
 
+func proxyConfigPath(mainPath string) string {
+	if strings.HasPrefix(mainPath, "config/") || strings.HasPrefix(mainPath, "config\\") {
+		return "config/proxy.conf"
+	}
+	return "proxy.conf"
+}
+
 func LoadConfig() (*Config, error) {
 	cfg, _, err := LoadConfigWithPath()
 	return cfg, err
@@ -157,6 +167,12 @@ func LoadConfigWithPath() (*Config, string, error) {
 		if err := mergeDNSConfig(cfg, string(dnsData)); err != nil {
 			return nil, "", fmt.Errorf("parse dns config: %w", err)
 		}
+	}
+
+	proxyPath := proxyConfigPath(configPath)
+	cfg.ProxyPath = proxyPath
+	if proxyErr := LoadProxyConfig(proxyPath, cfg); proxyErr != nil {
+		return nil, "", fmt.Errorf("parse proxy config: %w", proxyErr)
 	}
 
 	return cfg, configPath, nil

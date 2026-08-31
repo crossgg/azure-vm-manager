@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -25,7 +26,10 @@ type RuntimeState struct {
 }
 
 func InitRuntime(cfg *Config, path string, auth *AuthService) error {
-	next := buildCloudRuntime(cfg)
+	next, err := buildCloudRuntime(cfg)
+	if err != nil {
+		return err
+	}
 	runtimeState.mu.Lock()
 	defer runtimeState.mu.Unlock()
 
@@ -48,7 +52,11 @@ func ReloadRuntimeConfig() error {
 		setReloadError(err)
 		return err
 	}
-	next := buildCloudRuntime(cfg)
+	next, err := buildCloudRuntime(cfg)
+	if err != nil {
+		setReloadError(err)
+		return err
+	}
 
 	runtimeState.mu.RLock()
 	auth := runtimeState.auth
@@ -157,7 +165,8 @@ type cloudRuntime struct {
 	cloudflare    *CloudflareService
 }
 
-func buildCloudRuntime(cfg *Config) cloudRuntime {
+func buildCloudRuntime(cfg *Config) (cloudRuntime, error) {
+	proxyRouter := NewProxyRouter(cfg.Proxies, cfg.ProxyBindings)
 	next := cloudRuntime{
 		azureServices: make(map[string]*AzureService),
 		cloudServices: make(map[string]CloudService),
@@ -167,6 +176,11 @@ func buildCloudRuntime(cfg *Config) cloudRuntime {
 
 	for _, account := range cfg.AzureAccounts {
 		service := NewAzureAccountService(cfg, account)
+		client, err := proxyRouter.HTTPClient("azure", account.Name, 60*time.Second)
+		if err != nil {
+			return cloudRuntime{}, fmt.Errorf("configure Azure proxy for %s: %w", account.Name, err)
+		}
+		service.client = client
 		next.azureServices[account.Name] = service
 		next.cloudServices[serviceKey("azure", account.Name)] = service
 		next.cloudAccounts = append(next.cloudAccounts, gin.H{
@@ -180,10 +194,21 @@ func buildCloudRuntime(cfg *Config) cloudRuntime {
 	}
 	if next.azureService == nil {
 		next.azureService = NewAzureService(cfg)
+		client, err := proxyRouter.HTTPClient("azure", cfg.Azure.Name, 60*time.Second)
+		if err != nil {
+			return cloudRuntime{}, fmt.Errorf("configure Azure proxy for %s: %w", cfg.Azure.Name, err)
+		}
+		next.azureService.client = client
 	}
 
 	for _, account := range cfg.GCPAccounts {
-		next.cloudServices[serviceKey("gcp", account.Name)] = NewGCPService(account)
+		service := NewGCPService(account)
+		client, err := proxyRouter.HTTPClient("gcp", account.Name, 60*time.Second)
+		if err != nil {
+			return cloudRuntime{}, fmt.Errorf("configure GCP proxy for %s: %w", account.Name, err)
+		}
+		service.client = client
+		next.cloudServices[serviceKey("gcp", account.Name)] = service
 		next.cloudAccounts = append(next.cloudAccounts, gin.H{
 			"provider": "gcp",
 			"account":  account.Name,
@@ -191,12 +216,18 @@ func buildCloudRuntime(cfg *Config) cloudRuntime {
 		})
 	}
 	for _, account := range cfg.OCIAccounts {
-		next.cloudServices[serviceKey("oci", account.Name)] = NewOCIService(account)
+		service := NewOCIService(account)
+		client, err := proxyRouter.HTTPClient("oci", account.Name, 60*time.Second)
+		if err != nil {
+			return cloudRuntime{}, fmt.Errorf("configure OCI proxy for %s: %w", account.Name, err)
+		}
+		service.client = client
+		next.cloudServices[serviceKey("oci", account.Name)] = service
 		next.cloudAccounts = append(next.cloudAccounts, gin.H{
 			"provider": "oci",
 			"account":  account.Name,
 			"group":    account.Group,
 		})
 	}
-	return next
+	return next, nil
 }
