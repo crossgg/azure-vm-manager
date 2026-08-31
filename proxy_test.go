@@ -52,7 +52,8 @@ func TestProxyConfigRoundTrip(t *testing.T) {
 		{ID: "fallback", URL: "socks5://user:pass@127.0.0.1:1080", Remark: "fallback route"},
 	}
 	bindings := []ProxyBinding{
-		{Provider: "azure", Account: "account-a", ProxyID: "primary"},
+		{Provider: "azure", Account: "account-a", ProxyID: "primary", FallbackProxyID: proxyFallbackNone},
+		{Provider: "oci", Account: "account-c", ProxyID: "primary", FallbackProxyID: proxyFallbackDirect},
 		{Provider: "gcp", Account: "account-b", ProxyID: "primary", FallbackProxyID: "fallback"},
 	}
 	if err := SaveProxyConfig(path, proxies, bindings); err != nil {
@@ -78,6 +79,13 @@ func TestValidateProxyStateRejectsBrokenFallback(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "missing fallback proxy") {
 		t.Fatalf("expected missing fallback validation error, got %v", err)
+	}
+}
+
+func TestValidateProxyStateRejectsReservedProxyID(t *testing.T) {
+	err := validateProxyState([]ProxyConfig{{ID: proxyFallbackNone, URL: "http://127.0.0.1:8080"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved proxy id validation error, got %v", err)
 	}
 }
 
@@ -151,7 +159,7 @@ func TestFallbackRoundTripperReplaysRequestBody(t *testing.T) {
 func TestProxyRouterUsesAccountRoute(t *testing.T) {
 	router := NewProxyRouter(
 		[]ProxyConfig{{ID: "primary", URL: "http://127.0.0.1:8080"}},
-		[]ProxyBinding{{Provider: "azure", Account: "account", ProxyID: "primary"}},
+		[]ProxyBinding{{Provider: "azure", Account: "account", ProxyID: "primary", FallbackProxyID: proxyFallbackDirect}},
 	)
 	routed, err := router.HTTPClient("azure", "account", 60*time.Second)
 	if err != nil {
@@ -180,6 +188,24 @@ func TestProxyRouterUsesAccountRoute(t *testing.T) {
 	}
 }
 
+func TestProxyRouterSupportsNoFallback(t *testing.T) {
+	router := NewProxyRouter(
+		[]ProxyConfig{{ID: "primary", URL: "http://127.0.0.1:8080"}},
+		[]ProxyBinding{{Provider: "azure", Account: "account", ProxyID: "primary", FallbackProxyID: proxyFallbackNone}},
+	)
+	routed, err := router.HTTPClient("azure", "account", 60*time.Second)
+	if err != nil {
+		t.Fatalf("HTTPClient: %v", err)
+	}
+	if _, ok := routed.Transport.(*fallbackRoundTripper); ok {
+		t.Fatal("none fallback must not install a fallback round tripper")
+	}
+	primary, ok := routed.Transport.(*http.Transport)
+	if !ok || primary.Proxy == nil {
+		t.Fatalf("primary proxy transport = %T, want configured *http.Transport", routed.Transport)
+	}
+}
+
 func TestBuildCloudRuntimeAppliesProxyToWholeAccount(t *testing.T) {
 	cfg := &Config{
 		AzureAccounts: []AzureConfig{{Name: "azure-account"}},
@@ -187,9 +213,9 @@ func TestBuildCloudRuntimeAppliesProxyToWholeAccount(t *testing.T) {
 		OCIAccounts:   []OCIConfig{{Name: "oci-account"}},
 		Proxies:       []ProxyConfig{{ID: "primary", URL: "http://127.0.0.1:8080"}},
 		ProxyBindings: []ProxyBinding{
-			{Provider: "azure", Account: "azure-account", ProxyID: "primary"},
-			{Provider: "gcp", Account: "gcp-account", ProxyID: "primary"},
-			{Provider: "oci", Account: "oci-account", ProxyID: "primary"},
+			{Provider: "azure", Account: "azure-account", ProxyID: "primary", FallbackProxyID: proxyFallbackDirect},
+			{Provider: "gcp", Account: "gcp-account", ProxyID: "primary", FallbackProxyID: proxyFallbackDirect},
+			{Provider: "oci", Account: "oci-account", ProxyID: "primary", FallbackProxyID: proxyFallbackDirect},
 		},
 	}
 	runtime, err := buildCloudRuntime(cfg)

@@ -56,12 +56,18 @@ func (r *ProxyRouter) HTTPClient(provider, account string, timeout time.Duration
 	if err != nil {
 		return nil, err
 	}
+	fallbackID := normalizeProxyFallback(binding.FallbackProxyID)
+	if fallbackID == proxyFallbackNone {
+		return &http.Client{Timeout: timeout, Transport: primaryTransport}, nil
+	}
 
-	var fallback http.RoundTripper = directTransport()
-	if binding.FallbackProxyID != "" {
-		fallbackProxy, ok := r.proxies[binding.FallbackProxyID]
+	var fallback http.RoundTripper
+	if fallbackID == proxyFallbackDirect {
+		fallback = directTransport()
+	} else {
+		fallbackProxy, ok := r.proxies[fallbackID]
 		if !ok {
-			return nil, fmt.Errorf("fallback proxy %q not found", binding.FallbackProxyID)
+			return nil, fmt.Errorf("fallback proxy %q not found", fallbackID)
 		}
 		fallback, err = transportForProxy(fallbackProxy.URL)
 		if err != nil {

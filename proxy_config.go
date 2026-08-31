@@ -21,6 +21,11 @@ type ProxyBinding struct {
 	FallbackProxyID string `json:"fallbackProxyId"`
 }
 
+const (
+	proxyFallbackNone   = "none"
+	proxyFallbackDirect = "direct"
+)
+
 var proxyConfigMu sync.Mutex
 
 func LoadProxyConfig(path string, cfg *Config) error {
@@ -102,15 +107,11 @@ func LoadProxyConfig(path string, cfg *Config) error {
 	}
 	for _, name := range sectionOrder["proxy_binding"] {
 		values := sections["proxy_binding"][name]
-		fallback := values["fallback"]
-		if strings.EqualFold(fallback, "direct") {
-			fallback = ""
-		}
 		cfg.ProxyBindings = append(cfg.ProxyBindings, ProxyBinding{
 			Provider:        strings.ToLower(values["provider"]),
 			Account:         values["account"],
 			ProxyID:         values["proxy"],
-			FallbackProxyID: fallback,
+			FallbackProxyID: normalizeProxyFallback(values["fallback"]),
 		})
 	}
 	return validateProxyState(cfg.Proxies, cfg.ProxyBindings)
@@ -138,16 +139,12 @@ func SaveProxyConfig(path string, proxies []ProxyConfig, bindings []ProxyBinding
 	}
 	lines = append(lines, "proxy=end", "", "proxy_binding=begin")
 	for i, binding := range bindings {
-		fallback := binding.FallbackProxyID
-		if fallback == "" {
-			fallback = "direct"
-		}
 		lines = append(lines,
 			fmt.Sprintf("[binding-%d]", i+1),
 			"provider="+strings.ToLower(binding.Provider),
 			"account="+binding.Account,
 			"proxy="+binding.ProxyID,
-			"fallback="+fallback,
+			"fallback="+normalizeProxyFallback(binding.FallbackProxyID),
 		)
 	}
 	lines = append(lines, "proxy_binding=end", "")
@@ -167,6 +164,9 @@ func validateProxyState(proxies []ProxyConfig, bindings []ProxyBinding) error {
 		proxy := &proxies[i]
 		if proxy.ID == "" || hasUnsafeConfigValue(proxy.ID) || strings.ContainsAny(proxy.ID, `/\\`) {
 			return fmt.Errorf("invalid proxy id %q", proxy.ID)
+		}
+		if isReservedProxyFallback(proxy.ID) {
+			return fmt.Errorf("proxy id %q is reserved for fallback routing", proxy.ID)
 		}
 		if _, exists := proxyIDs[proxy.ID]; exists {
 			return fmt.Errorf("duplicate proxy id %q", proxy.ID)
@@ -191,12 +191,13 @@ func validateProxyState(proxies []ProxyConfig, bindings []ProxyBinding) error {
 		if _, ok := proxyIDs[binding.ProxyID]; !ok {
 			return fmt.Errorf("proxy binding references missing proxy %q", binding.ProxyID)
 		}
-		if binding.FallbackProxyID != "" {
-			if binding.FallbackProxyID == binding.ProxyID {
+		fallback := normalizeProxyFallback(binding.FallbackProxyID)
+		if fallback != proxyFallbackNone && fallback != proxyFallbackDirect {
+			if fallback == binding.ProxyID {
 				return fmt.Errorf("fallback proxy must differ from primary proxy")
 			}
-			if _, ok := proxyIDs[binding.FallbackProxyID]; !ok {
-				return fmt.Errorf("proxy binding references missing fallback proxy %q", binding.FallbackProxyID)
+			if _, ok := proxyIDs[fallback]; !ok {
+				return fmt.Errorf("proxy binding references missing fallback proxy %q", fallback)
 			}
 		}
 		key := proxyBindingKey(binding.Provider, binding.Account)
@@ -210,4 +211,20 @@ func validateProxyState(proxies []ProxyConfig, bindings []ProxyBinding) error {
 
 func proxyBindingKey(provider, account string) string {
 	return strings.ToLower(provider) + "\x00" + account
+}
+
+func normalizeProxyFallback(value string) string {
+	value = strings.TrimSpace(value)
+	switch {
+	case value == "", strings.EqualFold(value, proxyFallbackNone):
+		return proxyFallbackNone
+	case strings.EqualFold(value, proxyFallbackDirect):
+		return proxyFallbackDirect
+	default:
+		return value
+	}
+}
+
+func isReservedProxyFallback(value string) bool {
+	return strings.EqualFold(value, proxyFallbackNone) || strings.EqualFold(value, proxyFallbackDirect)
 }

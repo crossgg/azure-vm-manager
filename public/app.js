@@ -940,7 +940,7 @@ function renderProxySelectors() {
   const currentFallback = fallback.value;
   if (proxyPool.length === 0) {
     primary.innerHTML = '<option value="">请先添加代理</option>';
-    fallback.innerHTML = '<option value="">直连</option>';
+    fallback.innerHTML = '<option value="none">None（不回退）</option><option value="direct">直连</option>';
     primary.disabled = true;
     fallback.disabled = true;
     const submit = document.querySelector('.proxy-binding-submit');
@@ -954,11 +954,13 @@ function renderProxySelectors() {
   primary.innerHTML = proxyPool.map(proxy => `<option value="${escapeAttr(proxy.id)}">${escapeHtml(proxyOptionLabel(proxy))}</option>`).join('');
   if (proxyPool.some(proxy => proxy.id === currentPrimary)) primary.value = currentPrimary;
   const selectedPrimary = primary.value;
-  fallback.innerHTML = '<option value="">直连</option>' + proxyPool
+  fallback.innerHTML = '<option value="none">None（不回退）</option><option value="direct">直连</option>' + proxyPool
     .filter(proxy => proxy.id !== selectedPrimary)
     .map(proxy => `<option value="${escapeAttr(proxy.id)}">${escapeHtml(proxyOptionLabel(proxy))}</option>`)
     .join('');
-  if (proxyPool.some(proxy => proxy.id === currentFallback && proxy.id !== selectedPrimary)) fallback.value = currentFallback;
+  const fallbackExists = currentFallback === 'none' || currentFallback === 'direct' ||
+    proxyPool.some(proxy => proxy.id === currentFallback && proxy.id !== selectedPrimary);
+  fallback.value = fallbackExists ? currentFallback : 'none';
 }
 
 function applySelectedAccountBinding() {
@@ -973,9 +975,10 @@ function applySelectedAccountBinding() {
     ? binding.proxyId
     : proxyPool[0].id;
   renderProxySelectors();
-  fallback.value = binding && proxyPool.some(proxy => proxy.id === binding.fallbackProxyId && proxy.id !== primary.value)
-    ? binding.fallbackProxyId
-    : '';
+  const fallbackValue = binding?.fallbackProxyId || 'none';
+  const fallbackExists = fallbackValue === 'none' || fallbackValue === 'direct' ||
+    proxyPool.some(proxy => proxy.id === fallbackValue && proxy.id !== primary.value);
+  fallback.value = fallbackExists ? fallbackValue : 'none';
 }
 
 function proxyOptionLabel(proxy) {
@@ -1023,7 +1026,13 @@ function renderProxyBindings() {
   list.innerHTML = proxyBindings.map(binding => {
     const primary = proxyPool.find(proxy => proxy.id === binding.proxyId);
     const fallback = proxyPool.find(proxy => proxy.id === binding.fallbackProxyId);
-    const route = `${primary ? proxyOptionLabel(primary) : binding.proxyId} → ${fallback ? proxyOptionLabel(fallback) : '直连'}`;
+    const fallbackValue = binding.fallbackProxyId || 'none';
+    const fallbackLabel = fallbackValue === 'none'
+      ? 'None（不回退）'
+      : fallbackValue === 'direct'
+        ? '直连'
+        : fallback ? proxyOptionLabel(fallback) : fallbackValue;
+    const route = `${primary ? proxyOptionLabel(primary) : binding.proxyId} → ${fallbackLabel}`;
     return `
       <div class="proxy-binding-row"
         data-provider="${escapeAttr(binding.provider)}"

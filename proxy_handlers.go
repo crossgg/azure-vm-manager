@@ -106,7 +106,7 @@ func deleteProxy(c *gin.Context) {
 			continue
 		}
 		if binding.FallbackProxyID == id {
-			binding.FallbackProxyID = ""
+			binding.FallbackProxyID = proxyFallbackNone
 		}
 		nextBindings = append(nextBindings, binding)
 	}
@@ -185,7 +185,7 @@ func saveProxyBinding(c *gin.Context) {
 		Provider:        strings.ToLower(strings.TrimSpace(input.Provider)),
 		Account:         strings.TrimSpace(input.Account),
 		ProxyID:         strings.TrimSpace(input.ProxyID),
-		FallbackProxyID: strings.TrimSpace(input.FallbackProxyID),
+		FallbackProxyID: normalizeProxyFallback(input.FallbackProxyID),
 	}
 	if _, _, ok := serviceSnapshot(binding.Provider, binding.Account); !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("provider/account %s/%s not found", binding.Provider, binding.Account)})
